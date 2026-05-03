@@ -2,17 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Atari-style Dungeon Crawler MVP</title>
 <style>
-  html,body { margin:0; padding:0; background:#000; color:#0f0; font-family: "VT323","Courier New",monospace; overflow:hidden; }
-  #game { position:absolute; inset:0; }
+  html,body { margin:0; padding:0; background:#111; color:#0f0;
+              font-family: "VT323","Courier New",monospace; overflow:auto;
+              display:flex; justify-content:center; align-items:flex-start; }
+  /* Fixed portrait viewport: 400 logical x 800 logical. The wrap is the
+     authoritative size; we scale the whole thing with CSS transform on
+     resize so it always fits the device viewport without changing layout. */
+  #wrap { width:400px; height:800px; position:relative; background:#000;
+          border:1px solid #0a0; box-sizing:border-box;
+          transform-origin: top left; }
+  #game { position:absolute; left:0; top:0; width:400px; height:400px; overflow:hidden; }
+  #game canvas { display:block; width:400px; height:400px; }
   #ui {
-    position:absolute; left:0; right:0; bottom:0;
-    background:rgba(0,0,0,0.85); border-top:2px solid #0f0;
-    padding:8px 12px; font-size:18px; line-height:1.3;
-    display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;
+    position:absolute; left:0; top:400px; width:400px; height:400px;
+    background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
+    padding:6px; box-sizing:border-box; font-size:14px; line-height:1.25;
+    display:grid; grid-template-rows: auto auto 1fr; gap:6px;
   }
-  #ui .panel { border:1px solid #0a0; padding:6px 8px; min-height:90px; }
+  #ui .panel { border:1px solid #0a0; padding:4px 6px; }
   #ui h3 { margin:0 0 4px 0; font-size:16px; color:#9f9; letter-spacing:1px; }
   #log { position:absolute; top:8px; left:8px; right:8px; max-height:140px; overflow:hidden;
          background:rgba(0,0,0,0.55); padding:6px 10px; font-size:16px; pointer-events:none; }
@@ -21,15 +31,15 @@
            padding:4px 8px; margin:2px 2px 0 0; cursor:pointer; }
   button:hover { background:#040; }
   button:disabled { color:#050; border-color:#040; cursor:not-allowed; }
-  #compass { position:absolute; top:8px; right:8px; background:rgba(0,0,0,.65);
-             padding:6px 10px; border:1px solid #0a0; font-size:14px;
-             display:flex; align-items:center; gap:10px; }
-  #compassRose { width:60px; height:60px; position:relative; }
+  #compass { position:absolute; top:6px; right:6px; background:rgba(0,0,0,.65);
+             padding:4px 6px; border:1px solid #0a0; font-size:11px;
+             display:flex; align-items:center; gap:6px; line-height:1.05; }
+  #compassRose { width:42px; height:42px; position:relative; }
   #compassRose .ring { position:absolute; inset:0; border:1px solid #0a0; border-radius:50%; }
   #compassRose .needle {
     position:absolute; left:50%; top:50%; width:0; height:0;
-    border-left:6px solid transparent; border-right:6px solid transparent;
-    border-bottom:26px solid #ff4444;
+    border-left:4px solid transparent; border-right:4px solid transparent;
+    border-bottom:18px solid #ff4444;
     transform-origin: 50% 100%;
     transform: translate(-50%,-100%) rotate(0deg);
     transition: transform .15s ease-out;
@@ -37,13 +47,13 @@
   }
   #compassRose .tail {
     position:absolute; left:50%; top:50%; width:0; height:0;
-    border-left:5px solid transparent; border-right:5px solid transparent;
-    border-top:22px solid #888;
+    border-left:3px solid transparent; border-right:3px solid transparent;
+    border-top:14px solid #888;
     transform-origin: 50% 0%;
     transform: translate(-50%,0%) rotate(0deg);
     transition: transform .15s ease-out;
   }
-  #compassRose .lbl { position:absolute; font-size:11px; color:#9f9; }
+  #compassRose .lbl { position:absolute; font-size:9px; color:#9f9; }
   #compassRose .lN { top:0;    left:50%; transform:translate(-50%,-2px); }
   #compassRose .lS { bottom:0; left:50%; transform:translate(-50%,2px); }
   #compassRose .lE { top:50%;  right:0;  transform:translate(2px,-50%); }
@@ -52,6 +62,7 @@
 </style>
 </head>
 <body>
+<div id="wrap">
 <div id="game"></div>
 <div id="log"></div>
 <div id="compass">
@@ -68,6 +79,7 @@
   <div class="panel" id="movePanel">
     <h3>MOVE</h3>
     <button id="btnFwd">Forward (W)</button>
+    <button id="btnBack">Backward (S)</button>
     <button id="btnLeft">Turn Left (A)</button>
     <button id="btnRight">Turn Right (D)</button>
     <button id="btnDoor">Open/Close Door (E)</button>
@@ -77,12 +89,14 @@
     <h3>ROOM</h3>
     <div id="roomDesc">—</div>
     <div id="itemList"></div>
+    <div id="discoveredMap" style="margin-top:6px;"></div>
   </div>
   <div class="panel" id="combatPanel">
     <h3>STATUS</h3>
     <div id="statusLine">—</div>
     <div id="combatActions"></div>
   </div>
+</div>
 </div>
 
 <script type="importmap">
@@ -200,7 +214,9 @@ const state = {
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
+  anim: null, // {kind:'move'|'rotate', startTs, durMs, fromPos:THREE.Vector3, toPos, fromYaw, toYaw, onDone}
 };
+const ANIM_DURATION_MS = 500;
 
 function newLevel(level){
   const d = makeLevel(level);
@@ -223,16 +239,13 @@ function initThree(){
   scene.background = new THREE.Color(0x000000);
   scene.fog = new THREE.Fog(0x000000, CELL*0.8, CELL*2.2);
 
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.05, 50);
+  // Fixed 400x400 portrait viewport — same on every device, never resizes.
+  const VIEW_W = 400, VIEW_H = 400;
+  camera = new THREE.PerspectiveCamera(75, VIEW_W/VIEW_H, 0.05, 50);
   renderer = new THREE.WebGLRenderer({ antialias:false });
   renderer.setPixelRatio(1);
-  renderer.setSize(window.innerWidth, window.innerHeight - 110);
+  renderer.setSize(VIEW_W, VIEW_H);
   document.getElementById('game').appendChild(renderer.domElement);
-  window.addEventListener('resize', ()=>{
-    camera.aspect = window.innerWidth/(window.innerHeight-110);
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight-110);
-  });
 
   const amb = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(amb);
@@ -317,24 +330,35 @@ function renderVisibleRooms(){
   const p = state.player;
   const here = cellAt(p.x,p.y);
   if(!here) return;
-  here.seen = true;
-  drawRoom(here, p.x, p.y);
-  if(passageOpenInFront(here,p.dir)){
-    const nx=p.x+DIR_VEC[p.dir][0], ny=p.y+DIR_VEC[p.dir][1];
-    const next = cellAt(nx,ny);
-    if(next){ next.seen = true; drawRoom(next, nx, ny); }
+
+  // Visibility: BFS from player's cell, only crossing edges that are
+  // passable (open passage OR open door), limited to a 3x3 neighborhood
+  // (Chebyshev distance <= 1). This means up to 3 rooms in front when a
+  // straight hallway opens up, plus side-rooms reachable by going around
+  // a corner one step. Pre-rendering the wider set means rotation /
+  // forward animations have geometry already in place (no black flash).
+  const queue = [{cx:p.x, cy:p.y}];
+  const visited = new Set([`${p.x},${p.y}`]);
+  while(queue.length){
+    const {cx,cy} = queue.shift();
+    const c = cellAt(cx,cy);
+    if(!c) continue;
+    c.seen = true;
+    drawRoom(c, cx, cy);
+    for(let d=0; d<4; d++){
+      if(!passageOpenInFront(c,d)) continue;
+      const nx = cx + DIR_VEC[d][0], ny = cy + DIR_VEC[d][1];
+      const key = `${nx},${ny}`;
+      if(visited.has(key)) continue;
+      // Restrict to 3x3 around the player (Chebyshev <= 1).
+      if(Math.abs(nx - p.x) > 1 || Math.abs(ny - p.y) > 1) continue;
+      visited.add(key);
+      queue.push({cx:nx, cy:ny});
+    }
   }
-  // Camera: stand near the back wall of the room (behind player along their
-  // facing dir) so the room opens up in front of them and any enemy on the
-  // far side reads as a separate figure instead of in your face.
-  const v = DIR_VEC[p.dir];
-  const playerBackOffset = CELL * 0.4;
-  camera.position.set(
-    p.x*CELL + CELL/2 - v[0]*playerBackOffset,
-    WALL_H*0.55,
-    p.y*CELL + CELL/2 - v[1]*playerBackOffset
-  );
-  camera.lookAt(camera.position.x + v[0]*CELL, WALL_H*0.55, camera.position.z + v[1]*CELL);
+  if(!state.anim){
+    setCameraToCellAndDir(p.x, p.y, p.dir);
+  }
   // Move torch with player
   const torch = scene.getObjectByName('torch');
   if(torch) torch.position.copy(camera.position);
@@ -427,6 +451,37 @@ function drawWall(w, dir, ox, oz, c){
   }
 }
 
+// ----- camera pose helpers (kept identical between snap and tween) -----
+const PLAYER_BACK_OFFSET = CELL * 0.4;
+function cameraPosForCellAndDir(cx, cy, dir){
+  const v = DIR_VEC[dir];
+  return new THREE.Vector3(
+    cx*CELL + CELL/2 - v[0]*PLAYER_BACK_OFFSET,
+    WALL_H*0.55,
+    cy*CELL + CELL/2 - v[1]*PLAYER_BACK_OFFSET
+  );
+}
+// Yaw such that camera (default forward = -Z) ends up looking along DIR_VEC[dir].
+function yawForDir(dir){
+  const v = DIR_VEC[dir];
+  return Math.atan2(-v[0], -v[1]);
+}
+function setCameraToCellAndDir(cx, cy, dir){
+  const pos = cameraPosForCellAndDir(cx, cy, dir);
+  camera.position.copy(pos);
+  camera.rotation.set(0, yawForDir(dir), 0);
+  const torch = scene.getObjectByName('torch');
+  if(torch) torch.position.copy(pos);
+}
+// Choose the shortest signed delta between two yaws (radians).
+function shortestYawDelta(from, to){
+  let d = (to - from) % (Math.PI*2);
+  if(d >  Math.PI) d -= Math.PI*2;
+  if(d < -Math.PI) d += Math.PI*2;
+  return d;
+}
+function smoothstep(t){ return t*t*(3 - 2*t); }
+
 function makeTextSprite(text){
   const padX=12, padY=8;
   const cv = document.createElement('canvas');
@@ -474,7 +529,8 @@ function drawStairsMarker(ox,oz){
 
 // -------- gameplay actions --------
 function tryMoveForward(){
-  if(state.combat){ log("You can't run blindly — you're in combat. Use Flee."); return; }
+  if(state.anim){ return; } // input locked while moving
+  if(state.combat){ log("You can't run blindly — you're in combat. Use Run."); return; }
   const p = state.player;
   const here = cellAt(p.x,p.y);
   if(!passageOpenInFront(here,p.dir)){
@@ -483,10 +539,20 @@ function tryMoveForward(){
     else log("A solid wall blocks your way.");
     return;
   }
+  const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
   p.x += DIR_VEC[p.dir][0];
   p.y += DIR_VEC[p.dir][1];
-  log(`You step forward into a new room.`);
-  enterCell();
+  cellAt(p.x, p.y).seen = true;
+  const toPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  state.anim = {
+    kind:'move', startTs: performance.now(), durMs: ANIM_DURATION_MS,
+    fromPos, toPos, fromYaw: yawForDir(p.dir), toYaw: yawForDir(p.dir),
+    onDone: ()=>{ log(`You step forward into a new room.`); enterCell(); }
+  };
+  // Render with new logical pos so the destination + destination-ahead room
+  // is in the scene as the camera flies through. anim is set, so this won't
+  // snap the camera.
+  renderVisibleRooms();
 }
 
 function enterCell(){
@@ -499,9 +565,70 @@ function enterCell(){
   refreshUI();
 }
 
+// Step backward one cell (no facing change). If we land in a cell that
+// already has an enemy, chain a 180° spin animation onto the back-step so
+// the player ends up facing the threat before combat starts.
+function tryMoveBackward(){
+  if(state.anim){ return; }
+  if(state.combat){ log("You can't back up in combat. Use Run."); return; }
+  const p = state.player;
+  const back = (p.dir + 2) % 4;
+  const here = cellAt(p.x, p.y);
+  if(!passageOpenInFront(here, back)){
+    const w = here.walls[back];
+    if(w.type==='door' && !w.open) log("A door is shut behind you.");
+    else log("A wall is right behind you.");
+    return;
+  }
+  const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  p.x += DIR_VEC[back][0];
+  p.y += DIR_VEC[back][1];
+  cellAt(p.x, p.y).seen = true;
+  const toPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  state.anim = {
+    kind:'move', startTs: performance.now(), durMs: ANIM_DURATION_MS,
+    fromPos, toPos, fromYaw: yawForDir(p.dir), toYaw: yawForDir(p.dir),
+    onDone: ()=>{
+      log("You step backward.");
+      const here2 = cellAt(p.x, p.y);
+      if(here2.enemy){
+        // Chain a 180° spin animation; combat starts after the spin.
+        const oldDir = p.dir;
+        const oldYaw = yawForDir(oldDir);
+        const oldPosePos = cameraPosForCellAndDir(p.x, p.y, oldDir);
+        p.dir = (p.dir + 2) % 4;
+        const newYaw = oldYaw + shortestYawDelta(oldYaw, yawForDir(p.dir));
+        const newPosePos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+        renderVisibleRooms(); // redraw with new dir so the enemy mesh re-offsets toward the new facing wall
+        state.anim = {
+          kind:'rotate', startTs: performance.now(), durMs: ANIM_DURATION_MS,
+          fromPos: oldPosePos, toPos: newPosePos,
+          fromYaw: oldYaw, toYaw: newYaw,
+          onDone: ()=>{ log("You whirl around to face the threat!"); enterCell(); }
+        };
+      } else {
+        enterCell();
+      }
+    }
+  };
+  renderVisibleRooms();
+}
+
 function rotate(delta){
+  if(state.anim){ return; }
   if(state.combat){ log("Not while fighting!"); return; }
-  state.player.dir = ((state.player.dir + delta) % 4 + 4) % 4;
+  const p = state.player;
+  const fromYaw = yawForDir(p.dir);
+  p.dir = ((p.dir + delta) % 4 + 4) % 4;
+  const toYaw = fromYaw + shortestYawDelta(fromYaw, yawForDir(p.dir));
+  const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  state.anim = {
+    kind:'rotate', startTs: performance.now(), durMs: ANIM_DURATION_MS,
+    fromPos, toPos: fromPos, fromYaw, toYaw,
+    onDone: ()=>{ refreshUI(); }
+  };
+  // Render with new dir so any newly-visible next-ahead room is in scene
+  // during the spin. anim is set, so camera won't be snapped.
   renderVisibleRooms();
   refreshUI();
 }
@@ -693,11 +820,13 @@ function refreshUI(){
     `translate(-50%,-100%) rotate(${dirDeg}deg)`;
   document.getElementById('compassTail').style.transform =
     `translate(-50%,0%) rotate(${dirDeg}deg)`;
+  // Compact HUD top-right: rose + 3 short stat lines.
   document.getElementById('compassText').innerHTML =
-    `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}<br>` +
-    `<pre style="margin:4px 0 0;color:#9f9;font-size:13px;line-height:1.05;">${roomAsciiMap(c, p.dir)}</pre>` +
-    `<div style="margin-top:4px;color:#7c7;font-size:11px;">Map  (X=stairs  ==door  &quot;door  -|wall):</div>` +
-    `<pre style="margin:0;color:#cfc;font-size:12px;line-height:1.0;letter-spacing:0px;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
+    `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}`;
+  // The big maps now live in the ROOM panel where there's room for them.
+  document.getElementById('discoveredMap').innerHTML =
+    `<div style="color:#7c7;font-size:10px;margin-bottom:2px;">Map  X=stairs  ==/&quot;=door  -|=wall  ^&gt;v&lt;=you</div>` +
+    `<pre style="margin:0;color:#cfc;font-size:11px;line-height:1.0;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
 
   // room panel
   let desc = `You stand in a stone chamber.`;
@@ -743,6 +872,7 @@ function refreshUI(){
 
 // -------- bindings --------
 document.getElementById('btnFwd').onclick   = tryMoveForward;
+document.getElementById('btnBack').onclick  = tryMoveBackward;
 document.getElementById('btnLeft').onclick  = ()=>rotate(-1);
 document.getElementById('btnRight').onclick = ()=>rotate(+1);
 document.getElementById('btnDoor').onclick  = toggleDoor;
@@ -750,6 +880,7 @@ document.getElementById('btnStairs').onclick= descendStairs;
 
 window.addEventListener('keydown', (e)=>{
   if(e.key==='w'||e.key==='W'||e.key==='ArrowUp')    tryMoveForward();
+  else if(e.key==='s'||e.key==='S'||e.key==='ArrowDown') tryMoveBackward();
   else if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft')  rotate(-1);
   else if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') rotate(+1);
   else if(e.key==='e'||e.key==='E') toggleDoor();
@@ -769,11 +900,45 @@ window.addEventListener('keydown', (e)=>{
   }
 });
 
+// Scale the fixed 400x800 wrap to fill the viewport while keeping aspect.
+// Same layout on all platforms — we only zoom the whole thing.
+function fitWrapToViewport(){
+  const el = document.getElementById('wrap');
+  if(!el) return;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const scale = Math.min(vw/400, vh/800);
+  el.style.transform = `scale(${scale})`;
+  // Center horizontally inside the viewport.
+  document.body.style.minHeight = (800*scale) + 'px';
+  document.body.style.justifyContent = 'center';
+}
+window.addEventListener('resize', fitWrapToViewport);
+window.addEventListener('orientationchange', fitWrapToViewport);
+
 // -------- main --------
 initThree();
 newLevel(1);
+fitWrapToViewport();
+function tickAnimation(now){
+  const a = state.anim;
+  if(!a) return;
+  const t = Math.min(1, (now - a.startTs) / a.durMs);
+  const e = smoothstep(t);
+  camera.position.lerpVectors(a.fromPos, a.toPos, e);
+  const yaw = a.fromYaw + (a.toYaw - a.fromYaw) * e;
+  camera.rotation.set(0, yaw, 0);
+  const torch = scene.getObjectByName('torch');
+  if(torch) torch.position.copy(camera.position);
+  if(t >= 1){
+    const done = a.onDone;
+    state.anim = null;
+    if(done) done();
+  }
+}
+
 function loop(){
   requestAnimationFrame(loop);
+  tickAnimation(performance.now());
   renderer.render(scene,camera);
 }
 loop();
