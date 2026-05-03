@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Atari-style Dungeon Crawler MVP</title>
+<style>
+  html,body { margin:0; padding:0; background:#000; color:#0f0; font-family: "VT323","Courier New",monospace; overflow:hidden; }
+  #game { position:absolute; inset:0; }
+  #ui {
+    position:absolute; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,0.85); border-top:2px solid #0f0;
+    padding:8px 12px; font-size:18px; line-height:1.3;
+    display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;
+  }
+  #ui .panel { border:1px solid #0a0; padding:6px 8px; min-height:90px; }
+  #ui h3 { margin:0 0 4px 0; font-size:16px; color:#9f9; letter-spacing:1px; }
+  #log { position:absolute; top:8px; left:8px; right:8px; max-height:140px; overflow:hidden;
+         background:rgba(0,0,0,0.55); padding:6px 10px; font-size:16px; pointer-events:none; }
+  #log div { opacity:.95; }
+  button { background:#020; color:#0f0; border:1px solid #0a0; font-family:inherit; font-size:16px;
+           padding:4px 8px; margin:2px 2px 0 0; cursor:pointer; }
+  button:hover { background:#040; }
+  button:disabled { color:#050; border-color:#040; cursor:not-allowed; }
+  #compass { position:absolute; top:8px; right:8px; background:rgba(0,0,0,.65);
+             padding:6px 10px; border:1px solid #0a0; font-size:14px;
+             display:flex; align-items:center; gap:10px; }
+  #compassRose { width:60px; height:60px; position:relative; }
+  #compassRose .ring { position:absolute; inset:0; border:1px solid #0a0; border-radius:50%; }
+  #compassRose .needle {
+    position:absolute; left:50%; top:50%; width:0; height:0;
+    border-left:6px solid transparent; border-right:6px solid transparent;
+    border-bottom:26px solid #ff4444;
+    transform-origin: 50% 100%;
+    transform: translate(-50%,-100%) rotate(0deg);
+    transition: transform .15s ease-out;
+    filter: drop-shadow(0 0 2px #f00);
+  }
+  #compassRose .tail {
+    position:absolute; left:50%; top:50%; width:0; height:0;
+    border-left:5px solid transparent; border-right:5px solid transparent;
+    border-top:22px solid #888;
+    transform-origin: 50% 0%;
+    transform: translate(-50%,0%) rotate(0deg);
+    transition: transform .15s ease-out;
+  }
+  #compassRose .lbl { position:absolute; font-size:11px; color:#9f9; }
+  #compassRose .lN { top:0;    left:50%; transform:translate(-50%,-2px); }
+  #compassRose .lS { bottom:0; left:50%; transform:translate(-50%,2px); }
+  #compassRose .lE { top:50%;  right:0;  transform:translate(2px,-50%); }
+  #compassRose .lW { top:50%;  left:0;   transform:translate(-2px,-50%); }
+  #compassText { line-height:1.25; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="log"></div>
+<div id="compass">
+  <div id="compassRose">
+    <div class="ring"></div>
+    <div class="lbl lN">N</div><div class="lbl lE">E</div>
+    <div class="lbl lS">S</div><div class="lbl lW">W</div>
+    <div class="needle" id="compassNeedle"></div>
+    <div class="tail" id="compassTail"></div>
+  </div>
+  <div id="compassText"></div>
+</div>
+<div id="ui">
+  <div class="panel" id="movePanel">
+    <h3>MOVE</h3>
+    <button id="btnFwd">Forward (W)</button>
+    <button id="btnLeft">Turn Left (A)</button>
+    <button id="btnRight">Turn Right (D)</button>
+    <button id="btnDoor">Open/Close Door (E)</button>
+    <button id="btnStairs">Descend (Space)</button>
+  </div>
+  <div class="panel" id="roomPanel">
+    <h3>ROOM</h3>
+    <div id="roomDesc">—</div>
+    <div id="itemList"></div>
+  </div>
+  <div class="panel" id="combatPanel">
+    <h3>STATUS</h3>
+    <div id="statusLine">—</div>
+    <div id="combatActions"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// -------- constants --------
+const N=0, E=1, S=2, W=3;
+const DIR_NAMES = ['N','E','S','W'];
+const DIR_VEC = [[0,-1],[1,0],[0,1],[-1,0]]; // dx,dy for N,E,S,W (y grows south)
+const CELL = 4; // world units per room
+const WALL_H = 3;
+
+// -------- random --------
+function rng(seed){ let s=seed>>>0; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+let R = rng(Date.now()&0xffffffff);
+const ri = (n)=>Math.floor(R()*n);
+const choice = (a)=>a[ri(a.length)];
+
+// -------- dungeon generation --------
+// Each cell has walls[4] where each is 'wall' | 'open' | 'door' (door has 'open' bool).
+// We carve a maze via DFS, then convert some carved edges to doors, leave rest open. Outer = wall.
+function makeLevel(level){
+  const W_=8, H_=8;
+  const cells = [];
+  for(let y=0;y<H_;y++){
+    const row=[];
+    for(let x=0;x<W_;x++){
+      row.push({
+        x,y,
+        walls:[{type:'wall'},{type:'wall'},{type:'wall'},{type:'wall'}],
+        items:[], enemy:null, stairs:false, visited:false
+      });
+    }
+    cells.push(row);
+  }
+  const cellAt=(x,y)=> (x>=0&&y>=0&&x<W_&&y<H_)?cells[y][x]:null;
+
+  // DFS maze
+  const stack=[[ri(W_),ri(H_)]];
+  cellAt(stack[0][0],stack[0][1]).visited=true;
+  while(stack.length){
+    const [x,y]=stack[stack.length-1];
+    const opts=[];
+    for(let d=0;d<4;d++){
+      const nx=x+DIR_VEC[d][0], ny=y+DIR_VEC[d][1];
+      const c=cellAt(nx,ny);
+      if(c && !c.visited) opts.push(d);
+    }
+    if(!opts.length){ stack.pop(); continue; }
+    const d=choice(opts);
+    const nx=x+DIR_VEC[d][0], ny=y+DIR_VEC[d][1];
+    const here=cellAt(x,y), there=cellAt(nx,ny);
+    // 30% chance carve becomes a closed door; else open passage
+    const isDoor = R()<0.3;
+    here.walls[d] = isDoor ? {type:'door',open:false} : {type:'open'};
+    there.walls[(d+2)%4] = isDoor ? {type:'door',open:false} : {type:'open'};
+    there.visited=true;
+    stack.push([nx,ny]);
+  }
+
+  // Add a few extra openings for loops
+  for(let i=0;i<6;i++){
+    const x=ri(W_), y=ri(H_), d=ri(4);
+    const nx=x+DIR_VEC[d][0], ny=y+DIR_VEC[d][1];
+    const a=cellAt(x,y), b=cellAt(nx,ny);
+    if(!b) continue;
+    if(a.walls[d].type==='wall'){
+      a.walls[d]={type:'open'};
+      b.walls[(d+2)%4]={type:'open'};
+    }
+  }
+
+  // Place player far from stairs
+  const px=ri(W_), py=ri(H_);
+  let sx,sy;
+  do { sx=ri(W_); sy=ri(H_); } while(Math.abs(sx-px)+Math.abs(sy-py) < 6);
+  cellAt(sx,sy).stairs=true;
+
+  // Sprinkle items
+  const itemsPool = ['Rusty Sword','Healing Herb','Gold (5gp)','Torch','Iron Shield'];
+  for(let i=0;i<5;i++){
+    const c = cells[ri(H_)][ri(W_)];
+    if(c.stairs) continue;
+    c.items.push(choice(itemsPool));
+  }
+
+  // Sprinkle enemies (not in player's start cell, not on stairs)
+  const enemiesPool = [
+    {name:'Giant Rat', hp:5, atk:2},
+    {name:'Goblin',    hp:8, atk:3},
+    {name:'Skeleton',  hp:10,atk:4},
+    {name:'Slime',     hp:6, atk:2},
+  ];
+  const enemyCount = 3 + level;
+  for(let i=0;i<enemyCount;i++){
+    const ex=ri(W_), ey=ri(H_);
+    if(ex===px && ey===py) continue;
+    const c=cellAt(ex,ey);
+    if(c.enemy || c.stairs) continue;
+    const t = choice(enemiesPool);
+    c.enemy = { ...t, hpMax:t.hp };
+  }
+
+  return { W_, H_, cells, px, py };
+}
+
+// -------- game state --------
+const state = {
+  level: 1,
+  player: { x:0, y:0, dir:N, hp:20, hpMax:20, atk:4, gold:0, inv:[] },
+  dungeon: null,
+  combat: null, // {enemy, ref to cell}
+  awaitInput: false,
+};
+
+function newLevel(level){
+  const d = makeLevel(level);
+  state.dungeon = d;
+  state.player.x = d.px;
+  state.player.y = d.py;
+  state.player.dir = N;
+  state.combat = null;
+  buildScene();
+  log(`-- Level ${level} --`);
+  refreshUI();
+}
+
+// -------- three.js scene --------
+let scene, camera, renderer;
+let dungeonGroup;
+
+function initThree(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+  scene.fog = new THREE.Fog(0x000000, CELL*0.8, CELL*2.2);
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.05, 50);
+  renderer = new THREE.WebGLRenderer({ antialias:false });
+  renderer.setPixelRatio(1);
+  renderer.setSize(window.innerWidth, window.innerHeight - 110);
+  document.getElementById('game').appendChild(renderer.domElement);
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/(window.innerHeight-110);
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight-110);
+  });
+
+  const amb = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(amb);
+  const torch = new THREE.PointLight(0xffaa66, 1.6, CELL*3, 2);
+  torch.name='torch';
+  scene.add(torch);
+}
+
+function makeBrickTexture({ w=256, h=256, cols=8, rows=12,
+                             base='#5a4636', mortar='#1a1410', highlight='#6e5a48' } = {}){
+  const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = mortar; ctx.fillRect(0,0,w,h);
+  const bw = w/cols, bh = h/rows;
+  for(let r=0;r<rows;r++){
+    const offset = (r%2===0) ? 0 : bw/2;
+    for(let c=-1;c<cols+1;c++){
+      const x = c*bw + offset + 1;
+      const y = r*bh + 1;
+      ctx.fillStyle = base;
+      ctx.fillRect(x, y, bw-2, bh-2);
+      // subtle highlight on top edge
+      ctx.fillStyle = highlight;
+      ctx.fillRect(x, y, bw-2, 1);
+      // random speckles
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      for(let s=0;s<3;s++){
+        const sx = x + Math.random()*(bw-2);
+        const sy = y + Math.random()*(bh-2);
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.LinearMipMapLinearFilter;
+  return tex;
+}
+
+const wallTex = makeBrickTexture({ cols:6, rows:8, base:'#6b513c', mortar:'#1c1410', highlight:'#8a6b50' });
+wallTex.repeat.set(1,1);
+const floorTex = makeBrickTexture({ cols:3, rows:3, base:'#3a3024', mortar:'#0a0805', highlight:'#5a4630' });
+floorTex.repeat.set(1,1);
+const ceilTex = makeBrickTexture({ cols:5, rows:5, base:'#1a1612', mortar:'#000', highlight:'#241c14' });
+ceilTex.repeat.set(1,1);
+
+const matWall = new THREE.MeshStandardMaterial({ map:wallTex, roughness:1 });
+const matFloor = new THREE.MeshStandardMaterial({ map:floorTex, roughness:1 });
+const matCeil = new THREE.MeshStandardMaterial({ map:ceilTex, roughness:1 });
+const matDoorClosed = new THREE.MeshStandardMaterial({ color:0x884422, roughness:.7 });
+const matDoorOpen = new THREE.MeshStandardMaterial({ color:0x000000, transparent:true, opacity:0 });
+const matStairsDoor = new THREE.MeshStandardMaterial({ color:0x000000, emissive:0x000000 });
+const matEnemy = new THREE.MeshStandardMaterial({ color:0xaa2222, emissive:0x440000 });
+const matItem = new THREE.MeshStandardMaterial({ color:0xffcc33, emissive:0x664400 });
+
+// Build only the visible rooms (current + next-in-front if passage is open)
+function buildScene(){
+  if(dungeonGroup) scene.remove(dungeonGroup);
+  dungeonGroup = new THREE.Group();
+  scene.add(dungeonGroup);
+  renderVisibleRooms();
+}
+
+function cellAt(x,y){
+  const d = state.dungeon;
+  if(!d) return null;
+  if(x<0||y<0||x>=d.W_||y>=d.H_) return null;
+  return d.cells[y][x];
+}
+
+function passageOpenInFront(c, dir){
+  if(!c) return false;
+  const w = c.walls[dir];
+  if(w.type==='open') return true;
+  if(w.type==='door' && w.open) return true;
+  return false;
+}
+
+function renderVisibleRooms(){
+  while(dungeonGroup.children.length) dungeonGroup.remove(dungeonGroup.children[0]);
+  const p = state.player;
+  const here = cellAt(p.x,p.y);
+  if(!here) return;
+  drawRoom(here, p.x, p.y);
+  if(passageOpenInFront(here,p.dir)){
+    const nx=p.x+DIR_VEC[p.dir][0], ny=p.y+DIR_VEC[p.dir][1];
+    const next = cellAt(nx,ny);
+    if(next) drawRoom(next, nx, ny);
+  }
+  // Position camera at player room center
+  camera.position.set(p.x*CELL + CELL/2, WALL_H*0.55, p.y*CELL + CELL/2);
+  // Look down +x for E, etc. our DIR_VEC matches: N -y, E +x, S +y, W -x
+  const v = DIR_VEC[p.dir];
+  camera.lookAt(camera.position.x + v[0]*CELL, WALL_H*0.55, camera.position.z + v[1]*CELL);
+  // Move torch with player
+  const torch = scene.getObjectByName('torch');
+  if(torch) torch.position.copy(camera.position);
+}
+
+function drawRoom(c, gx, gy){
+  const ox = gx*CELL, oz = gy*CELL;
+  // floor
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(CELL,CELL), matFloor);
+  floor.rotation.x = -Math.PI/2;
+  floor.position.set(ox+CELL/2, 0, oz+CELL/2);
+  dungeonGroup.add(floor);
+  // ceiling
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(CELL,CELL), matCeil);
+  ceil.rotation.x = Math.PI/2;
+  ceil.position.set(ox+CELL/2, WALL_H, oz+CELL/2);
+  dungeonGroup.add(ceil);
+  // 4 walls (N=-z, E=+x, S=+z, W=-x)
+  for(let d=0;d<4;d++){
+    drawWall(c.walls[d], d, ox, oz, c);
+  }
+  // stairs marker (black door with down arrow on north wall if cell has stairs)
+  if(c.stairs){
+    drawStairsMarker(ox,oz);
+  }
+  // items: small glowing boxes on floor with floating name labels
+  c.items.forEach((name, idx)=>{
+    const spread = (c.items.length>1) ? 0.7 : 0;
+    const ang = (idx / Math.max(c.items.length,1)) * Math.PI*2;
+    const ix = ox+CELL/2 + Math.cos(ang)*spread;
+    const iz = oz+CELL/2 + Math.sin(ang)*spread;
+    const itm = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4), matItem);
+    itm.position.set(ix, 0.25, iz);
+    dungeonGroup.add(itm);
+    const lbl = makeTextSprite(name);
+    lbl.position.set(ix, 0.85, iz);
+    dungeonGroup.add(lbl);
+  });
+  // enemy: a red upright box
+  if(c.enemy){
+    const e = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
+    e.position.set(ox+CELL/2, 0.8, oz+CELL/2 - 0.3);
+    dungeonGroup.add(e);
+  }
+}
+
+function drawWall(w, dir, ox, oz, c){
+  // Wall plane positioned at the appropriate side of cell
+  let cx=ox+CELL/2, cz=oz+CELL/2, rotY=0, dx=0, dz=0;
+  if(dir===N){ dz=-CELL/2; rotY=0; }
+  if(dir===S){ dz=+CELL/2; rotY=Math.PI; }
+  if(dir===E){ dx=+CELL/2; rotY=-Math.PI/2; }
+  if(dir===W){ dx=-CELL/2; rotY=Math.PI/2; }
+  const px=cx+dx, pz=cz+dz;
+
+  if(w.type==='wall'){
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H), matWall);
+    m.position.set(px, WALL_H/2, pz); m.rotation.y = rotY;
+    dungeonGroup.add(m);
+  } else if(w.type==='door'){
+    // doorway frame (top) and door panel
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H*0.25), matWall);
+    frame.position.set(px, WALL_H*0.875, pz); frame.rotation.y=rotY;
+    dungeonGroup.add(frame);
+    if(!w.open){
+      const door = new THREE.Mesh(new THREE.PlaneGeometry(CELL*0.6, WALL_H*0.75), matDoorClosed);
+      door.position.set(px, WALL_H*0.375, pz); door.rotation.y=rotY;
+      dungeonGroup.add(door);
+    }
+    // side fillers
+    const filler1 = new THREE.Mesh(new THREE.PlaneGeometry(CELL*0.2, WALL_H*0.75), matWall);
+    const filler2 = filler1.clone();
+    const ax = (rotY===0||Math.abs(rotY)===Math.PI) ? CELL*0.4 : 0;
+    const az = (rotY===0||Math.abs(rotY)===Math.PI) ? 0 : CELL*0.4;
+    filler1.position.set(px-ax, WALL_H*0.375, pz-az); filler1.rotation.y=rotY;
+    filler2.position.set(px+ax, WALL_H*0.375, pz+az); filler2.rotation.y=rotY;
+    dungeonGroup.add(filler1, filler2);
+  } else {
+    // open: nothing (passage). Optionally a thin lintel.
+    const lintel = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H*0.15), matWall);
+    lintel.position.set(px, WALL_H*0.925, pz); lintel.rotation.y=rotY;
+    dungeonGroup.add(lintel);
+  }
+}
+
+function makeTextSprite(text){
+  const padX=12, padY=8;
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d');
+  const font = 'bold 36px "Courier New", monospace';
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  cv.width  = Math.ceil(metrics.width) + padX*2;
+  cv.height = 48 + padY*2;
+  // redo because resizing canvas resets ctx
+  const c2 = cv.getContext('2d');
+  c2.font = font;
+  c2.fillStyle = 'rgba(0,0,0,0.7)';
+  c2.fillRect(0,0,cv.width,cv.height);
+  c2.strokeStyle = '#0f0';
+  c2.lineWidth = 2;
+  c2.strokeRect(1,1,cv.width-2,cv.height-2);
+  c2.fillStyle = '#bfffbf';
+  c2.textBaseline = 'middle';
+  c2.fillText(text, padX, cv.height/2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map:tex, depthTest:false, transparent:true });
+  const sp = new THREE.Sprite(mat);
+  // scale: keep aspect, ~1 world unit tall
+  const scale = 0.014;
+  sp.scale.set(cv.width*scale, cv.height*scale, 1);
+  sp.renderOrder = 999;
+  return sp;
+}
+
+function drawStairsMarker(ox,oz){
+  // a black slab in the center floor with a downward indicator
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(CELL*0.6, 0.05, CELL*0.6),
+    new THREE.MeshStandardMaterial({color:0x000000, emissive:0x002200}));
+  slab.position.set(ox+CELL/2, 0.03, oz+CELL/2);
+  dungeonGroup.add(slab);
+  // down-arrow: triangle prism pointing down
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 3),
+    new THREE.MeshStandardMaterial({color:0x33ff33, emissive:0x115511}));
+  arrow.rotation.x = Math.PI;
+  arrow.position.set(ox+CELL/2, 0.5, oz+CELL/2);
+  dungeonGroup.add(arrow);
+}
+
+// -------- gameplay actions --------
+function tryMoveForward(){
+  if(state.combat){ log("You can't run blindly — you're in combat. Use Flee."); return; }
+  const p = state.player;
+  const here = cellAt(p.x,p.y);
+  if(!passageOpenInFront(here,p.dir)){
+    const w = here.walls[p.dir];
+    if(w.type==='door' && !w.open) log("A door blocks your path. Open it first.");
+    else log("A solid wall blocks your way.");
+    return;
+  }
+  p.x += DIR_VEC[p.dir][0];
+  p.y += DIR_VEC[p.dir][1];
+  log(`You step forward into a new room.`);
+  enterCell();
+}
+
+function enterCell(){
+  const c = cellAt(state.player.x, state.player.y);
+  if(c.enemy){
+    state.combat = { enemy: c.enemy, cellRef: c };
+    log(`A ${c.enemy.name} blocks the way! (HP ${c.enemy.hp}/${c.enemy.hpMax})`);
+  }
+  renderVisibleRooms();
+  refreshUI();
+}
+
+function rotate(delta){
+  if(state.combat){ log("Not while fighting!"); return; }
+  state.player.dir = ((state.player.dir + delta) % 4 + 4) % 4;
+  renderVisibleRooms();
+  refreshUI();
+}
+
+function toggleDoor(){
+  const p = state.player;
+  const here = cellAt(p.x,p.y);
+  const w = here.walls[p.dir];
+  if(w.type !== 'door'){ log("There's no door in front of you."); return; }
+  w.open = !w.open;
+  // mirror on other side
+  const nx=p.x+DIR_VEC[p.dir][0], ny=p.y+DIR_VEC[p.dir][1];
+  const other = cellAt(nx,ny);
+  if(other) other.walls[(p.dir+2)%4].open = w.open;
+  log(w.open ? "You open the door. It groans on rusty hinges." : "You shut the door.");
+  renderVisibleRooms();
+  refreshUI();
+}
+
+function descendStairs(){
+  const c = cellAt(state.player.x, state.player.y);
+  if(!c.stairs){ log("No stairs here."); return; }
+  state.level++;
+  log(`You descend deeper into the dungeon...`);
+  newLevel(state.level);
+}
+
+function pickUpItem(idx){
+  const c = cellAt(state.player.x, state.player.y);
+  const item = c.items.splice(idx,1)[0];
+  if(item.startsWith('Gold')){
+    const m = item.match(/(\d+)/);
+    const g = m? parseInt(m[1]):0;
+    state.player.gold += g;
+    log(`You pocket ${g}gp.`);
+  } else {
+    state.player.inv.push(item);
+    log(`You pick up: ${item}.`);
+  }
+  renderVisibleRooms();
+  refreshUI();
+}
+
+// -------- combat --------
+function combatAttack(){
+  if(!state.combat) return;
+  const e = state.combat.enemy;
+  const dmg = 1 + ri(state.player.atk);
+  e.hp -= dmg;
+  log(`You strike the ${e.name} for ${dmg}.`);
+  if(e.hp <= 0){
+    log(`The ${e.name} crumples to the floor!`);
+    state.combat.cellRef.enemy = null;
+    state.combat = null;
+    renderVisibleRooms();
+    refreshUI();
+    return;
+  }
+  enemyTurn();
+}
+function combatFlee(){
+  if(!state.combat) return;
+  // 60% chance to flee back to where we came from
+  if(R() < 0.6){
+    // step backward one cell if possible
+    const p = state.player;
+    const back = (p.dir+2)%4;
+    const here = cellAt(p.x,p.y);
+    if(passageOpenInFront(here,back)){
+      p.x += DIR_VEC[back][0]; p.y += DIR_VEC[back][1];
+      log("You scramble back the way you came!");
+      state.combat = null;
+      renderVisibleRooms();
+      refreshUI();
+      return;
+    }
+    log("Nowhere to flee to — your back is to a wall!");
+  } else {
+    log("You stumble trying to flee!");
+  }
+  enemyTurn();
+}
+function enemyTurn(){
+  const e = state.combat && state.combat.enemy;
+  if(!e) return;
+  const dmg = 1 + ri(e.atk);
+  state.player.hp -= dmg;
+  log(`The ${e.name} hits you for ${dmg}.`);
+  if(state.player.hp <= 0){
+    log("You die in the dark. GAME OVER. (refresh to retry)");
+    state.combat = null;
+  }
+  refreshUI();
+}
+
+// -------- UI --------
+function log(msg){
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.textContent = '> ' + msg;
+  el.prepend(d);
+  while(el.children.length>6) el.removeChild(el.lastChild);
+}
+
+// Top-down 5x5 ASCII of current room. Walls show as #, open passage as ' ',
+// closed door as +, open door as . . Player @ in center, arrow shows facing.
+function roomAsciiMap(c, dir){
+  const sym = (w)=> w.type==='wall' ? '#'
+                  : w.type==='door' ? (w.open ? '.' : '+')
+                  : ' ';
+  const arrow = ['^','>','v','<'][dir];
+  const N_ = sym(c.walls[N]);
+  const S_ = sym(c.walls[S]);
+  const E_ = sym(c.walls[E]);
+  const W_ = sym(c.walls[W]);
+  const lines = [
+    `#${'#'}${N_}${'#'}#`,
+    `#   #`,
+    `${W_}  ${arrow}  ${E_}`.replace(/\s+/, m=>m).slice(0,5),
+    `#   #`,
+    `#${'#'}${S_}${'#'}#`,
+  ];
+  // Build line 3 carefully (5 chars wide): W . arrow . E
+  lines[2] = `${W_} ${arrow} ${E_}`;
+  return lines.join('\n');
+}
+
+function refreshUI(){
+  const p = state.player;
+  const c = cellAt(p.x,p.y);
+  // Compass: rotate red needle to point in player's facing dir.
+  // CSS rotation: needle base points up (= North). N=0deg, E=90, S=180, W=270.
+  const dirDeg = [0,90,180,270][p.dir];
+  document.getElementById('compassNeedle').style.transform =
+    `translate(-50%,-100%) rotate(${dirDeg}deg)`;
+  document.getElementById('compassTail').style.transform =
+    `translate(-50%,0%) rotate(${dirDeg}deg)`;
+  document.getElementById('compassText').innerHTML =
+    `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}<br><pre style="margin:4px 0 0;color:#9f9;font-size:13px;line-height:1.05;">${roomAsciiMap(c, p.dir)}</pre>`;
+
+  // room panel
+  let desc = `You stand in a stone chamber.`;
+  if(c.stairs) desc += ` In the center: a black portal etched with a downward arrow.`;
+  const wf = c.walls[p.dir];
+  desc += `\nAhead: ${wf.type==='wall' ? 'solid wall' : wf.type==='door' ? (wf.open?'open doorway':'closed door') : 'open passage'}.`;
+  document.getElementById('roomDesc').textContent = desc;
+
+  const itemList = document.getElementById('itemList');
+  itemList.innerHTML = '';
+  c.items.forEach((it,i)=>{
+    const b = document.createElement('button');
+    b.textContent = `Take: ${it}`;
+    b.onclick = ()=> pickUpItem(i);
+    itemList.appendChild(b);
+  });
+
+  // status / combat panel
+  let status = `HP ${p.hp}/${p.hpMax}   Gold ${p.gold}\n`;
+  status += `Inv: ${p.inv.length? p.inv.join(', ') : '(empty)'}`;
+  document.getElementById('statusLine').textContent = status;
+
+  const ca = document.getElementById('combatActions');
+  ca.innerHTML = '';
+  if(state.combat){
+    const e = state.combat.enemy;
+    const t = document.createElement('div');
+    t.textContent = `In combat with ${e.name} (HP ${e.hp}/${e.hpMax})`;
+    ca.appendChild(t);
+    const ba = document.createElement('button'); ba.textContent='Attack'; ba.onclick=combatAttack;
+    const bf = document.createElement('button'); bf.textContent='Flee';   bf.onclick=combatFlee;
+    ca.append(ba,bf);
+  }
+
+  // movement buttons enable/disable
+  document.getElementById('btnFwd').disabled = !!state.combat;
+  document.getElementById('btnLeft').disabled = !!state.combat;
+  document.getElementById('btnRight').disabled = !!state.combat;
+  document.getElementById('btnDoor').disabled = !!state.combat || (c.walls[p.dir].type!=='door');
+  document.getElementById('btnStairs').disabled = !c.stairs || !!state.combat;
+}
+
+// -------- bindings --------
+document.getElementById('btnFwd').onclick   = tryMoveForward;
+document.getElementById('btnLeft').onclick  = ()=>rotate(-1);
+document.getElementById('btnRight').onclick = ()=>rotate(+1);
+document.getElementById('btnDoor').onclick  = toggleDoor;
+document.getElementById('btnStairs').onclick= descendStairs;
+
+window.addEventListener('keydown', (e)=>{
+  if(e.key==='w'||e.key==='W'||e.key==='ArrowUp')    tryMoveForward();
+  else if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft')  rotate(-1);
+  else if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') rotate(+1);
+  else if(e.key==='e'||e.key==='E') toggleDoor();
+  else if(e.key===' ') descendStairs();
+});
+
+// -------- main --------
+initThree();
+newLevel(1);
+function loop(){
+  requestAnimationFrame(loop);
+  renderer.render(scene,camera);
+}
+loop();
+</script>
+</body>
+</html>
