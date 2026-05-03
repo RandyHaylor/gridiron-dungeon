@@ -579,11 +579,10 @@ function combatAttack(){
   }
   enemyTurn();
 }
-function combatFlee(){
+function combatRun(){
   if(!state.combat) return;
-  // 60% chance to flee back to where we came from
+  // 60% chance to run back to where we came from
   if(R() < 0.6){
-    // step backward one cell if possible
     const p = state.player;
     const back = (p.dir+2)%4;
     const here = cellAt(p.x,p.y);
@@ -595,9 +594,9 @@ function combatFlee(){
       refreshUI();
       return;
     }
-    log("Nowhere to flee to — your back is to a wall!");
+    log("Nowhere to run — your back is to a wall!");
   } else {
-    log("You stumble trying to flee!");
+    log("You stumble trying to run!");
   }
   enemyTurn();
 }
@@ -730,7 +729,7 @@ function refreshUI(){
     t.textContent = `In combat with ${e.name} (HP ${e.hp}/${e.hpMax})`;
     ca.appendChild(t);
     const ba = document.createElement('button'); ba.textContent='Attack (F)'; ba.onclick=combatAttack;
-    const bf = document.createElement('button'); bf.textContent='Flee';   bf.onclick=combatFlee;
+    const bf = document.createElement('button'); bf.textContent='Run (R)'; bf.onclick=combatRun;
     ca.append(ba,bf);
   }
 
@@ -763,6 +762,10 @@ window.addEventListener('keydown', (e)=>{
   else if(e.key==='f'||e.key==='F'){
     if(state.combat) combatAttack();
     else log("Nothing to fight.");
+  }
+  else if(e.key==='r'||e.key==='R'){
+    if(state.combat) combatRun();
+    else log("Nothing to run from.");
   }
 });
 
