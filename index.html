@@ -116,7 +116,7 @@ function makeLevel(level){
       row.push({
         x,y,
         walls:[{type:'wall'},{type:'wall'},{type:'wall'},{type:'wall'}],
-        items:[], enemy:null, stairs:false, visited:false
+        items:[], enemy:null, stairs:false, visited:false, seen:false
       });
     }
     cells.push(row);
@@ -195,7 +195,8 @@ function makeLevel(level){
 // -------- game state --------
 const state = {
   level: 1,
-  player: { x:0, y:0, dir:N, hp:20, hpMax:20, atk:4, gold:0, inv:[] },
+  player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0, inv:[],
+            weapon: { name:'Fists', atk:1 } },
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
@@ -316,16 +317,23 @@ function renderVisibleRooms(){
   const p = state.player;
   const here = cellAt(p.x,p.y);
   if(!here) return;
+  here.seen = true;
   drawRoom(here, p.x, p.y);
   if(passageOpenInFront(here,p.dir)){
     const nx=p.x+DIR_VEC[p.dir][0], ny=p.y+DIR_VEC[p.dir][1];
     const next = cellAt(nx,ny);
-    if(next) drawRoom(next, nx, ny);
+    if(next){ next.seen = true; drawRoom(next, nx, ny); }
   }
-  // Position camera at player room center
-  camera.position.set(p.x*CELL + CELL/2, WALL_H*0.55, p.y*CELL + CELL/2);
-  // Look down +x for E, etc. our DIR_VEC matches: N -y, E +x, S +y, W -x
+  // Camera: stand near the back wall of the room (behind player along their
+  // facing dir) so the room opens up in front of them and any enemy on the
+  // far side reads as a separate figure instead of in your face.
   const v = DIR_VEC[p.dir];
+  const playerBackOffset = CELL * 0.4;
+  camera.position.set(
+    p.x*CELL + CELL/2 - v[0]*playerBackOffset,
+    WALL_H*0.55,
+    p.y*CELL + CELL/2 - v[1]*playerBackOffset
+  );
   camera.lookAt(camera.position.x + v[0]*CELL, WALL_H*0.55, camera.position.z + v[1]*CELL);
   // Move torch with player
   const torch = scene.getObjectByName('torch');
@@ -365,11 +373,18 @@ function drawRoom(c, gx, gy){
     lbl.position.set(ix, 0.85, iz);
     dungeonGroup.add(lbl);
   });
-  // enemy: a red upright box
+  // enemy: a red upright box; if this is the player's cell push it toward
+  // the wall the player is facing so player + enemy each have a wall behind.
   if(c.enemy){
-    const e = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
-    e.position.set(ox+CELL/2, 0.8, oz+CELL/2 - 0.3);
-    dungeonGroup.add(e);
+    let ex = ox+CELL/2, ez = oz+CELL/2;
+    if(gx === state.player.x && gy === state.player.y){
+      const ev = DIR_VEC[state.player.dir];
+      ex += ev[0] * CELL * 0.35;
+      ez += ev[1] * CELL * 0.35;
+    }
+    const eMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
+    eMesh.position.set(ex, 0.8, ez);
+    dungeonGroup.add(eMesh);
   }
 }
 
@@ -514,6 +529,14 @@ function descendStairs(){
   newLevel(state.level);
 }
 
+// Weapons table: name -> attack value. Anything in here is treated as a weapon
+// (only one carried at a time; picking a new one drops the current onto the floor).
+const WEAPON_STATS = {
+  'Fists':       1,
+  'Rusty Sword': 3,
+  'Iron Sword':  5,
+};
+
 function pickUpItem(idx){
   const c = cellAt(state.player.x, state.player.y);
   const item = c.items.splice(idx,1)[0];
@@ -522,6 +545,15 @@ function pickUpItem(idx){
     const g = m? parseInt(m[1]):0;
     state.player.gold += g;
     log(`You pocket ${g}gp.`);
+  } else if(WEAPON_STATS.hasOwnProperty(item)){
+    const old = state.player.weapon;
+    state.player.weapon = { name:item, atk:WEAPON_STATS[item] };
+    if(old.name !== 'Fists'){
+      c.items.push(old.name);
+      log(`You wield ${item} (atk ${WEAPON_STATS[item]}); you drop your ${old.name}.`);
+    } else {
+      log(`You wield ${item} (atk ${WEAPON_STATS[item]}).`);
+    }
   } else {
     state.player.inv.push(item);
     log(`You pick up: ${item}.`);
@@ -534,7 +566,7 @@ function pickUpItem(idx){
 function combatAttack(){
   if(!state.combat) return;
   const e = state.combat.enemy;
-  const dmg = 1 + ri(state.player.atk);
+  const dmg = 1 + ri(state.player.weapon.atk);
   e.hp -= dmg;
   log(`You strike the ${e.name} for ${dmg}.`);
   if(e.hp <= 0){
@@ -591,6 +623,44 @@ function log(msg){
   while(el.children.length>6) el.removeChild(el.lastChild);
 }
 
+// Discovered top-down map of the whole level. Unseen cells = ' ',
+// seen cells = '.', player cell = facing arrow ^>v<.
+// Stairs marked 'X' once seen.
+// Each cell renders as a 3-wide x 3-tall block sharing edges with neighbors:
+//   + - +
+//   | . |
+//   + - +
+// where corners are '+', wall H is '-', wall V is '|', closed door H is '=',
+// closed door V is '"', and open passage / open door is a blank.
+// Cell interior is the player arrow, 'X' for stairs, '.' for plain seen room,
+// ' ' for unseen.
+function buildDiscoveredLevelAsciiMap(){
+  const d = state.dungeon, p = state.player;
+  const arrow = ['^','>','v','<'][p.dir];
+  const cols=d.W_, rows=d.H_;
+  const gw = cols*2+1, gh = rows*2+1;
+  const g = Array.from({length:gh}, ()=> Array(gw).fill(' '));
+  const wallH = (w)=> w.type==='wall' ? '-' : w.type==='door' ? (w.open ? ' ' : '=') : ' ';
+  const wallV = (w)=> w.type==='wall' ? '|' : w.type==='door' ? (w.open ? ' ' : '"') : ' ';
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const c = d.cells[y][x];
+      if(!c.seen) continue;
+      const cx = x*2+1, cy = y*2+1;
+      g[cy-1][cx-1] = '+'; g[cy-1][cx+1] = '+';
+      g[cy+1][cx-1] = '+'; g[cy+1][cx+1] = '+';
+      g[cy-1][cx] = wallH(c.walls[N]);
+      g[cy+1][cx] = wallH(c.walls[S]);
+      g[cy][cx-1] = wallV(c.walls[W]);
+      g[cy][cx+1] = wallV(c.walls[E]);
+      if(x===p.x && y===p.y)      g[cy][cx] = arrow;
+      else if(c.stairs)            g[cy][cx] = 'X';
+      else                          g[cy][cx] = '.';
+    }
+  }
+  return g.map(r=>r.join('')).join('\n');
+}
+
 // Top-down 5x5 ASCII of current room. Walls show as #, open passage as ' ',
 // closed door as +, open door as . . Player @ in center, arrow shows facing.
 function roomAsciiMap(c, dir){
@@ -625,7 +695,10 @@ function refreshUI(){
   document.getElementById('compassTail').style.transform =
     `translate(-50%,0%) rotate(${dirDeg}deg)`;
   document.getElementById('compassText').innerHTML =
-    `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}<br><pre style="margin:4px 0 0;color:#9f9;font-size:13px;line-height:1.05;">${roomAsciiMap(c, p.dir)}</pre>`;
+    `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}<br>` +
+    `<pre style="margin:4px 0 0;color:#9f9;font-size:13px;line-height:1.05;">${roomAsciiMap(c, p.dir)}</pre>` +
+    `<div style="margin-top:4px;color:#7c7;font-size:11px;">Map  (X=stairs  ==door  &quot;door  -|wall):</div>` +
+    `<pre style="margin:0;color:#cfc;font-size:12px;line-height:1.0;letter-spacing:0px;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
 
   // room panel
   let desc = `You stand in a stone chamber.`;
@@ -638,13 +711,14 @@ function refreshUI(){
   itemList.innerHTML = '';
   c.items.forEach((it,i)=>{
     const b = document.createElement('button');
-    b.textContent = `Take: ${it}`;
+    b.textContent = (i===0 ? `Take (T): ${it}` : `Take: ${it}`);
     b.onclick = ()=> pickUpItem(i);
     itemList.appendChild(b);
   });
 
   // status / combat panel
   let status = `HP ${p.hp}/${p.hpMax}   Gold ${p.gold}\n`;
+  status += `Wpn: ${p.weapon.name}   Attack: ${p.weapon.atk}\n`;
   status += `Inv: ${p.inv.length? p.inv.join(', ') : '(empty)'}`;
   document.getElementById('statusLine').textContent = status;
 
@@ -655,7 +729,7 @@ function refreshUI(){
     const t = document.createElement('div');
     t.textContent = `In combat with ${e.name} (HP ${e.hp}/${e.hpMax})`;
     ca.appendChild(t);
-    const ba = document.createElement('button'); ba.textContent='Attack'; ba.onclick=combatAttack;
+    const ba = document.createElement('button'); ba.textContent='Attack (F)'; ba.onclick=combatAttack;
     const bf = document.createElement('button'); bf.textContent='Flee';   bf.onclick=combatFlee;
     ca.append(ba,bf);
   }
@@ -681,6 +755,15 @@ window.addEventListener('keydown', (e)=>{
   else if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') rotate(+1);
   else if(e.key==='e'||e.key==='E') toggleDoor();
   else if(e.key===' ') descendStairs();
+  else if(e.key==='t'||e.key==='T'){
+    const c = cellAt(state.player.x, state.player.y);
+    if(c.items.length) pickUpItem(0);
+    else log("Nothing on the floor here.");
+  }
+  else if(e.key==='f'||e.key==='F'){
+    if(state.combat) combatAttack();
+    else log("Nothing to fight.");
+  }
 });
 
 // -------- main --------
