@@ -38,14 +38,23 @@
   .hand.left  { left:0;    transform: rotate(-15deg); }
   .hand.right { right:0;   transform: rotate(20deg); }
   .hand[hidden]{ display:none; }
-  /* Attack swing: weapon rises higher, earlier, stays up longer, lowers
-     later. Total duration intentionally longer than the camera yaw bob
-     so the held weapon is still up when the swing visual ends. */
+  /* Damage flash: full red veil over the 3D viewport, fades out fast. */
+  #hitFlash { position:absolute; inset:0; background:rgba(220,30,30,0.55);
+              pointer-events:none; opacity:0; z-index:8; }
+  @keyframes hitFlashKf {
+    0%   { opacity:0.6; }
+    100% { opacity:0; }
+  }
+  #hitFlash.active { animation: hitFlashKf 360ms ease-out; }
+  /* Attack sequence: rise (0-29%), hold while camera rotates (29-71%),
+     lower (71-100%). Total duration ~420ms = 120 raise + 180 rotate +
+     120 lower, matched to the JS-side ATTACK_SWORD_RAISE_MS and
+     ATTACK_SWING_DURATION_MS constants. */
   @keyframes attackSwingKf {
     0%   { transform: rotate(20deg) translateY(0); }
-    18%  { transform: rotate(20deg) translateY(-90px); }   /* fast rise */
-    78%  { transform: rotate(20deg) translateY(-90px); }   /* long hold */
-    100% { transform: rotate(20deg) translateY(0); }       /* late drop */
+    29%  { transform: rotate(20deg) translateY(-90px); }
+    71%  { transform: rotate(20deg) translateY(-90px); }
+    100% { transform: rotate(20deg) translateY(0); }
   }
   .hand.right.attackSwing { animation: attackSwingKf 420ms ease-in-out; }
   #ui {
@@ -153,6 +162,8 @@
        upper portion of the held sprite peeks up like a Doom-era HUD. -->
   <div class="hand left"><img src="sprites/item_torch.png" alt="torch" /></div>
   <div class="hand right" id="rightHand" hidden><img src="sprites/item_rusty_sword.png" alt="weapon" /></div>
+  <!-- Red flash overlay: pulsed when an enemy hit lands. -->
+  <div id="hitFlash"></div>
 </div>
 <div id="compass">
   <div id="compassRose">
@@ -321,7 +332,8 @@ const state = {
   screenShake:  null, // {startTs, until, durMs, magnitude}
 };
 const ANIM_DURATION_MS = 250;
-const ATTACK_SWING_DURATION_MS = 180; // camera yaw bob — fast
+const ATTACK_SWING_DURATION_MS = 180; // camera yaw bob (rotate phase)
+const ATTACK_SWORD_RAISE_MS = 120;    // sword rises before yaw starts
 const SCREEN_SHAKE_DURATION_MS = 220;
 const SCREEN_SHAKE_MAGNITUDE = 0.18;
 const ENEMY_BOB_AMPLITUDE = 0.06;
@@ -897,14 +909,20 @@ function pickUpItem(idx){
 const PLAYER_HIT_CHANCE = 0.75;
 
 function triggerAttackSwingAnimation(){
-  state.attackSwing = { startTs: performance.now(), durMs: ATTACK_SWING_DURATION_MS };
-  // CSS keyframe lifts the right-hand weapon sprite up then back down.
+  // Sequence: raise sword first, THEN camera yaw bob (the "swing"), THEN
+  // sword lowers. Sword CSS animation runs the full sequence; camera yaw
+  // is delayed so it kicks in while the sword is at peak.
   const rh = document.getElementById('rightHand');
-  if(rh && !rh.hidden){
+  const hasWeapon = rh && !rh.hidden;
+  if(hasWeapon){
     rh.classList.remove('attackSwing');
     void rh.offsetWidth; // force reflow so re-adding restarts the animation
     rh.classList.add('attackSwing');
   }
+  const yawStartDelayMs = hasWeapon ? ATTACK_SWORD_RAISE_MS : 0;
+  setTimeout(()=>{
+    state.attackSwing = { startTs: performance.now(), durMs: ATTACK_SWING_DURATION_MS };
+  }, yawStartDelayMs);
 }
 
 function combatAttack(){
@@ -974,6 +992,13 @@ function enemyTurn(){
       startTs: now, until: now + SCREEN_SHAKE_DURATION_MS,
       durMs: SCREEN_SHAKE_DURATION_MS, magnitude: SCREEN_SHAKE_MAGNITUDE
     };
+    // Red veil flash on the 3D view to telegraph the hit.
+    const f = document.getElementById('hitFlash');
+    if(f){
+      f.classList.remove('active');
+      void f.offsetWidth;
+      f.classList.add('active');
+    }
   }
   if(dr > 0 && dmg < raw){
     log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
@@ -1034,15 +1059,9 @@ function buildDiscoveredLevelAsciiMap(){
       else                          g[cy][cx] = ' ';
     }
   }
-  if(maxRow < 0) return ''; // nothing seen yet
-  // Trim to the bounding box of seen cells (in grid-coord rows/cols).
-  const r0 = minRow*2,     r1 = maxRow*2 + 2;
-  const c0 = minCol*2,     c1 = maxCol*2 + 2;
-  const out = [];
-  for(let r=r0; r<=r1; r++){
-    out.push(g[r].slice(c0, c1+1).join(''));
-  }
-  return out.join('\n');
+  // Always return the full-level grid (no bounding-box trim) so callers
+  // can translate it by exact ch/em units to keep the player centered.
+  return g.map(r => r.join('')).join('\n');
 }
 
 // Top-down 5x5 ASCII of current room. Walls show as #, open passage as ' ',
@@ -1098,9 +1117,19 @@ function refreshUI(){
   document.getElementById('compassText').innerHTML =
     `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}`;
   // The discovered map renders as a half-transparent backdrop behind the
-  // ROOM info text. No legend.
+  // ROOM info text. The map is the full level; we translate the <pre> in
+  // ch/em units so the player's character (^>v<) sits at the panel's
+  // visual center while the map orientation stays north-up.
+  const playerMapCol = state.player.x * 2 + 1;
+  const playerMapRow = state.player.y * 2 + 1;
+  const mapGw = state.dungeon.W_ * 2 + 1;
+  const mapGh = state.dungeon.H_ * 2 + 1;
+  const dxCh = (mapGw / 2) - playerMapCol - 0.5;
+  const dyEm = (mapGh / 2) - playerMapRow - 0.5;
   document.getElementById('discoveredMap').innerHTML =
-    `<pre style="margin:0;color:#cfc;font-size:18px;line-height:1.0;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
+    `<pre style="margin:0;color:#cfc;font-size:18px;line-height:1.0;` +
+    `font-family:'Courier New',monospace;` +
+    `transform:translate(${dxCh}ch, ${dyEm}em);">${buildDiscoveredLevelAsciiMap()}</pre>`;
 
   // room panel
   let desc = `You stand in a stone chamber.`;
