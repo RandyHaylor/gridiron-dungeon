@@ -218,7 +218,7 @@ function makeLevel(level){
   cellAt(sx,sy).stairs=true;
 
   // Sprinkle items
-  const itemsPool = ['Rusty Sword','Healing Herb','Gold (5gp)','Torch','Iron Shield'];
+  const itemsPool = ['Rusty Sword','Healing Herb','Gold (5gp)','Torch','Rusty Shield'];
   for(let i=0;i<5;i++){
     const c = cells[ri(H_)][ri(W_)];
     if(c.stairs) continue;
@@ -249,7 +249,8 @@ function makeLevel(level){
 const state = {
   level: 1,
   player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0, inv:[],
-            weapon: { name:'Fists', atk:1 } },
+            weapon: { name:'Fists', atk:1 },
+            shield: { name:'None',  dr:0 } },
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
@@ -727,6 +728,12 @@ const WEAPON_STATS = {
   'Rusty Sword': 3,
   'Iron Sword':  5,
 };
+// Shields table: name -> damage reduction (subtracted from incoming hits).
+// Same single-slot rules as weapons: picking up a different shield drops
+// the previous one onto the floor.
+const SHIELD_STATS = {
+  'Rusty Shield': 1,
+};
 
 function pickUpItem(idx){
   const c = cellAt(state.player.x, state.player.y);
@@ -744,6 +751,15 @@ function pickUpItem(idx){
       log(`You wield ${item} (atk ${WEAPON_STATS[item]}); you drop your ${old.name}.`);
     } else {
       log(`You wield ${item} (atk ${WEAPON_STATS[item]}).`);
+    }
+  } else if(SHIELD_STATS.hasOwnProperty(item)){
+    const old = state.player.shield;
+    state.player.shield = { name:item, dr:SHIELD_STATS[item] };
+    if(old.name !== 'None'){
+      c.items.push(old.name);
+      log(`You strap on ${item} (dmg-reduction ${SHIELD_STATS[item]}); you drop your ${old.name}.`);
+    } else {
+      log(`You strap on ${item} (dmg-reduction ${SHIELD_STATS[item]}).`);
     }
   } else {
     state.player.inv.push(item);
@@ -813,9 +829,15 @@ function enemyTurn(){
     refreshUI();
     return;
   }
-  const dmg = 1 + ri(e.atk);
+  const raw = 1 + ri(e.atk);
+  const dr = state.player.shield.dr;
+  const dmg = Math.max(0, raw - dr);
   state.player.hp -= dmg;
-  log(`The ${e.name} hits you for ${dmg}.`);
+  if(dr > 0 && dmg < raw){
+    log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
+  } else {
+    log(`The ${e.name} hits you for ${dmg}.`);
+  }
   if(state.player.hp <= 0){
     log("You die in the dark. GAME OVER. (refresh to retry)");
     state.combat = null;
@@ -941,6 +963,7 @@ function refreshUI(){
   // status / combat panel
   let status = `HP ${p.hp}/${p.hpMax}   Gold ${p.gold}\n`;
   status += `Wpn: ${p.weapon.name}   Attack: ${p.weapon.atk}\n`;
+  status += `Shld: ${p.shield.name}   DR: ${p.shield.dr}\n`;
   status += `Inv: ${p.inv.length? p.inv.join(', ') : '(empty)'}`;
   document.getElementById('statusLine').textContent = status;
 
