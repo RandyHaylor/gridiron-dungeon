@@ -84,6 +84,21 @@
                        padding:10px; box-sizing:border-box; z-index:50;
                        display:flex; flex-direction:column; gap:6px; }
   #inventoryOverlay[hidden] { display:none !important; }
+  /* Start screen with splash + volume sliders. Required user-gesture
+     before any audio plays. */
+  #startScreen { position:absolute; left:0; right:0; top:0; bottom:0;
+                  background:#000; z-index:120; padding:14px;
+                  box-sizing:border-box; display:flex; flex-direction:column;
+                  align-items:center; justify-content:center; gap:14px;
+                  font-family:"VT323","Courier New",monospace; }
+  #startScreen[hidden] { display:none !important; }
+  #startScreen img { max-width:100%; height:auto; border:1px solid #0a0; }
+  #startScreen .vol-row { display:flex; align-items:center; gap:8px;
+                           color:#cfc; font-size:16px; min-width:240px; }
+  #startScreen .vol-row input[type=range] { flex:1; }
+  #btnStartGame { font-size:22px; padding:10px 26px; background:#063;
+                   color:#aaffaa; border:1px solid #0f6;
+                   box-shadow: 0 0 6px #0f4 inset, 0 0 6px #0f4; }
   /* Vendor overlay: same shape as inventory; green accents to match
      the friendly NPC. */
   #vendorOverlay { position:absolute; left:0; right:0; top:0; bottom:0;
@@ -247,6 +262,16 @@
     <div id="deathMsg">one more skeleton for my army...</div>
     <div id="deathStats"></div>
     <button id="btnPlayAgain">Play Again (Space)</button>
+  </div>
+  <div id="startScreen">
+    <img src="docs/splash.svg" alt="gridiron-dungeon" />
+    <div class="vol-row">Music
+      <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.5" />
+    </div>
+    <div class="vol-row">SFX
+      <input type="range" id="sfxVolSlider"   min="0" max="1" step="0.01" value="0.7" />
+    </div>
+    <button id="btnStartGame">Enter Dungeon</button>
   </div>
   <div id="vendorOverlay" hidden>
     <div id="vendorHeader">VENDOR <span style="font-size:11px;opacity:.7;">(V or Close to dismiss)</span></div>
@@ -893,6 +918,7 @@ function tryMoveForward(){
     toCellX:   p.x,                     toCellY:   p.y,
     onDone: ()=>{ log(`You step forward into a new room.`); enterCell(); }
   };
+  playSfx('footstep');
   renderVisibleRooms();
 }
 
@@ -957,6 +983,7 @@ function tryMoveBackward(){
       }
     }
   };
+  playSfx('footstep');
   renderVisibleRooms();
 }
 
@@ -996,6 +1023,7 @@ function toggleDoor(){
   const nx=p.x+DIR_VEC[p.dir][0], ny=p.y+DIR_VEC[p.dir][1];
   const other = cellAt(nx,ny);
   if(other) other.walls[(p.dir+2)%4].open = w.open;
+  playSfx('door');
   log(w.open ? "You open the door. It groans on rusty hinges." : "You shut the door.");
   renderVisibleRooms();
   refreshUI();
@@ -1004,6 +1032,7 @@ function toggleDoor(){
 function descendStairs(){
   const c = cellAt(state.player.x, state.player.y);
   if(!c.stairs){ log("No stairs here."); return; }
+  playSfx('descend_stairs');
   state.level++;
   log(`You descend deeper into the dungeon...`);
   newLevel(state.level);
@@ -1052,6 +1081,7 @@ function pickUpItem(idx){
     const g = m? parseInt(m[1]):0;
     state.player.gold += g;
     state.stats.goldCollected += g;
+    playSfx('gold_collect');
     log(`You pocket ${g}gp.`);
   } else if(WEAPON_STATS.hasOwnProperty(item)){
     const old = state.player.weapon;
@@ -1073,6 +1103,7 @@ function pickUpItem(idx){
     }
   } else {
     state.player.inv.push(item);
+    if(item === 'Healing Herb') playSfx('herb_collect');
     log(`You pick up: ${item}.`);
   }
   renderVisibleRooms();
@@ -1089,6 +1120,7 @@ function pickUpItem(idx){
 const PLAYER_HIT_CHANCE = 0.75;
 
 function triggerAttackSwingAnimation(){
+  playSfx('sword_swing');
   // Camera yaw bob and sword down-and-forward swing run in combination,
   // started at the same instant — no raise/hold/lower phasing.
   const rh = document.getElementById('rightHand');
@@ -1123,6 +1155,7 @@ function combatAttack(){
       if(enemyObj){
         flashEnemyHurtTint(enemyObj);
         spawnFloatingDamageNumberAboveEnemy(playerDmg, enemyObj);
+        playSfx('damage_dealt');
       }
     }, peakDelayMs);
   }
@@ -1236,6 +1269,7 @@ function enemyTurn(){
         f.classList.add('active');
       }
       showPlayerDamageNumberHud(dmg);
+      playSfx('damage_taken');
     }
     if(dr > 0 && dmg < raw){
       log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
@@ -1460,6 +1494,7 @@ function triggerPlayerDeath(){
   if(state.dead) return;
   state.dead = true;
   state.deathStartTs = performance.now();
+  playSfx('death_sting');
   state.combat = null;
   state.combatBusy = false;
   state.pendingAction = null;
@@ -1545,6 +1580,7 @@ function buyFromVendor(item){
   }
   state.player.gold -= item.price;
   state.player.inv.push(item.name);
+  playSfx('herb_collect');
   log(`Bought ${item.name} for ${item.price}gp.`);
   refreshUI();
   renderVendorOverlay();
@@ -1612,6 +1648,7 @@ function useConsumableByName(name){
   const fn = CONSUMABLES[name];
   if(fn){
     const msg = fn(state.player);
+    if(name === 'Healing Herb') playSfx('herb_take');
     log(msg);
   }
   refreshUI();
@@ -1741,6 +1778,79 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('resize', fitWrapToViewport);
   window.visualViewport.addEventListener('scroll', fitWrapToViewport);
 }
+
+// ---------- audio: random music + SFX bank ----------
+const AUDIO_BASE = 'dark_atari_dungeon_mp3_pack_v4_full_music';
+const MUSIC_TRACKS = [
+  '01_catacomb_nocturne.mp3','02_black_lantern_waltz.mp3','03_crypt_procession.mp3',
+  '04_moonlit_requiem.mp3','05_iron_chapel.mp3','06_graveyard_courante.mp3',
+  '07_veil_of_ashes.mp3','08_hollow_court.mp3','09_raven_fughetta.mp3','10_stone_spiral.mp3'
+].map(f => `${AUDIO_BASE}/music_mp3/${f}`);
+// Asset folder ships door_shut_*.mp3 in door_open_shut/; we use those for
+// any door toggle (open or close).
+function sfxList(folder, prefix, count){
+  const out = [];
+  for(let i=1;i<=count;i++) out.push(`${AUDIO_BASE}/sfx_mp3/${folder}/${prefix}_${i}.mp3`);
+  return out;
+}
+const SFX_BANK = {
+  sword_swing:    sfxList('sword_swing',    'sword_swing',    4),
+  damage_dealt:   sfxList('damage_dealt',   'damage_dealt',   4),
+  damage_taken:   sfxList('damage_taken',   'damage_taken',   4),
+  death_sting:    sfxList('death_sting',    'death_sting',    4),
+  descend_stairs: sfxList('descend_stairs', 'descend_stairs', 4),
+  door:           sfxList('door_open_shut', 'door_shut',      4),
+  footstep:       sfxList('footstep',       'footstep',       4),
+  gold_collect:   sfxList('gold_collect',   'gold_collect',   4),
+  herb_collect:   sfxList('herb_collect',   'herb_collect',   4),
+  herb_take:      sfxList('herb_take',      'herb_take',      4),
+};
+let audioMusicVolume = 0.5;
+let audioSfxVolume   = 0.7;
+let audioMusicEl     = null;
+let audioStarted     = false;
+
+function pickRandomMusicTrack(){
+  return MUSIC_TRACKS[Math.floor(Math.random()*MUSIC_TRACKS.length)];
+}
+function startBackgroundMusic(){
+  if(audioMusicEl){
+    try { audioMusicEl.pause(); } catch(_){}
+  }
+  audioMusicEl = new Audio(pickRandomMusicTrack());
+  audioMusicEl.volume = audioMusicVolume;
+  audioMusicEl.onended = ()=>{ if(audioStarted) startBackgroundMusic(); };
+  audioMusicEl.play().catch(()=>{});
+}
+function setMusicVolume(v){
+  audioMusicVolume = v;
+  if(audioMusicEl) audioMusicEl.volume = v;
+}
+function setSfxVolume(v){
+  audioSfxVolume = v;
+}
+function playSfx(category){
+  if(!audioStarted) return;
+  const list = SFX_BANK[category];
+  if(!list || !list.length) return;
+  const path = list[Math.floor(Math.random()*list.length)];
+  try {
+    const a = new Audio(path);
+    a.volume = audioSfxVolume;
+    a.play().catch(()=>{});
+  } catch(_){}
+}
+
+function dismissStartScreen(){
+  const ss = document.getElementById('startScreen');
+  if(!ss) return;
+  ss.hidden = true;
+  audioStarted = true;
+  startBackgroundMusic();
+}
+document.getElementById('btnStartGame').onclick = dismissStartScreen;
+document.getElementById('musicVolSlider').oninput = (e)=> setMusicVolume(parseFloat(e.target.value));
+document.getElementById('sfxVolSlider').oninput   = (e)=> setSfxVolume(parseFloat(e.target.value));
 
 // -------- main --------
 initThree();
