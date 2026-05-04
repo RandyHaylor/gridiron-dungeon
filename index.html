@@ -249,7 +249,12 @@ let dungeonGroup;
 function initThree(){
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  scene.fog = new THREE.Fog(0x000000, CELL*0.8, CELL*2.2);
+  // No distance fog: THREE.Fog measures from the camera, which is offset
+  // ~0.4 cells back from the room center and moves around during rotation
+  // — that produced a "spherical" feel where visibility shifted with
+  // facing. Visibility is now strictly the 3x3 grid BFS computed from the
+  // player's cell center; the torch point light handles atmosphere.
+  scene.fog = null;
 
   // 3D viewport is 16:10 in the top of the layout — same on every device.
   const VIEW_W = 400, VIEW_H = 250;
@@ -798,7 +803,7 @@ function buildDiscoveredLevelAsciiMap(){
       g[cy][cx+1] = wallV(c.walls[E]);
       if(x===p.x && y===p.y)      g[cy][cx] = arrow;
       else if(c.stairs)            g[cy][cx] = 'X';
-      else                          g[cy][cx] = '.';
+      else                          g[cy][cx] = ' ';
     }
   }
   if(maxRow < 0) return ''; // nothing seen yet
