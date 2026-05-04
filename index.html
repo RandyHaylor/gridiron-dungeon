@@ -443,7 +443,10 @@ function makeLevel(level){
   }
   placeUniqueFloorItem(swordToSpawn);
   placeUniqueFloorItem(shieldToSpawn);
-  // Sprinkle other floor items (no swords/shields here).
+  // Guarantee 3 spare torches each level (in addition to whatever the
+  // sprinkle below randomly drops).
+  for(let i=0;i<3;i++) placeUniqueFloorItem('Torch');
+  // Sprinkle other floor items (no swords/shields/guaranteed torches here).
   const itemsPool = ['Healing Herb','Gold (5gp)','Torch'];
   for(let i=0;i<5;i++){
     const c = cells[ri(H_)][ri(W_)];
@@ -503,7 +506,7 @@ const state = {
             inv:['Healing Herb','Healing Herb'],
             weapon: { name:'Fists', atk:1 },
             shield: { name:'None',  dr:0 },
-            torchCharges: 20 + Math.floor(Math.random()*11) },
+            torchCharges: 75 + Math.floor(Math.random()*16) },
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
@@ -1470,7 +1473,7 @@ function roomAsciiMap(c, dir){
 }
 
 // ---------- torch charges ----------
-function freshTorchCharges(){ return 20 + Math.floor(Math.random()*11); } // 20..30
+function freshTorchCharges(){ return 75 + Math.floor(Math.random()*16); } // 75..90
 function extinguishPlayerTorch(){
   state.player.torchCharges = 0;
   const idx = state.player.inv.indexOf('Torch');
@@ -2099,10 +2102,20 @@ function applyTorchLightingEffects(){
   const torch = scene && scene.getObjectByName('torch');
   const charges = state.player.torchCharges;
   const lh = document.querySelector('.hand.left');
+  // Fog distances are camera-relative in three.js, but the camera is
+  // offset PLAYER_BACK_OFFSET behind the room center. Add that offset
+  // to all near/far values so the fog gradient reads as anchored to
+  // the room center instead of the player's eyepoint.
+  const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   if(charges <= 0){
-    // Torch out: dim point light, tighten fog, hide left-hand sprite.
-    if(torch){ torch.intensity = 0.25; torch.distance = CELL * 1.4; }
-    if(scene && scene.fog){ scene.fog.near = CELL * 0.2; scene.fog.far = CELL * 1.0; }
+    // Torch out: dim point light. Fog pushed beyond the current room's
+    // far wall (which sits ~3.6 units from camera) so the room walls
+    // are clearly visible; everything past the room is void anyway.
+    if(torch){ torch.intensity = 0.35; torch.distance = CELL * 1.6; }
+    if(scene && scene.fog){
+      scene.fog.near = CELL * 1.0 + centerBias; // ~5.6
+      scene.fog.far  = CELL * 1.5 + centerBias; // ~7.6
+    }
     if(lh) lh.style.opacity = '0';
     return;
   }
@@ -2116,7 +2129,10 @@ function applyTorchLightingEffects(){
     }
   }
   if(torch){ torch.intensity = intensity; torch.distance = distance; }
-  if(scene && scene.fog){ scene.fog.near = CELL * 0.5; scene.fog.far = CELL * 2.6; }
+  if(scene && scene.fog){
+    scene.fog.near = CELL * 0.5 + centerBias; // ~3.6
+    scene.fog.far  = CELL * 2.6 + centerBias; // ~12.0
+  }
   if(lh) lh.style.opacity = '1';
 }
 
