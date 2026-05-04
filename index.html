@@ -456,10 +456,7 @@ function drawWall(w, dir, ox, oz, c){
     filler2.position.set(px+ax, WALL_H*0.375, pz+az); filler2.rotation.y=rotY;
     dungeonGroup.add(filler1, filler2);
   } else {
-    // open: nothing (passage). Optionally a thin lintel.
-    const lintel = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H*0.15), matWall);
-    lintel.position.set(px, WALL_H*0.925, pz); lintel.rotation.y=rotY;
-    dungeonGroup.add(lintel);
+    // open passage: render nothing — just a clear opening between rooms.
   }
 }
 
