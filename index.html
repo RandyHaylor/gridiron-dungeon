@@ -1001,7 +1001,6 @@ function tryMoveForward(){
     toCellX:   p.x,                     toCellY:   p.y,
     onDone: ()=>{
       consumePlayerTorchStep();
-      log(`You step forward into a new room.`);
       enterCell();
     }
   };
@@ -1049,7 +1048,6 @@ function tryMoveBackward(){
     toCellX:   p.x,                    toCellY:   p.y,
     onDone: ()=>{
       consumePlayerTorchStep();
-      log("You step backward.");
       const here2 = cellAt(p.x, p.y);
       if(here2.enemy){
         // Chain a 180° spin animation; combat starts after the spin.
