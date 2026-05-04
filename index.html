@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Atari-style Dungeon Crawler MVP</title>
+<title>grid-A-Iron Dungeon</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <!-- VT323 = IBM VT-style monochrome terminal font, the closest match to
@@ -92,7 +92,9 @@
                   align-items:center; justify-content:center; gap:14px;
                   font-family:"VT323","Courier New",monospace; }
   #startScreen[hidden] { display:none !important; }
-  #startScreen img { max-width:100%; height:auto; border:1px solid #0a0; }
+  /* Splash graphic sized to cover the 3D viewport region (400x300). */
+  #startScreen img { width:400px; height:300px; image-rendering:pixelated;
+                      border:1px solid #0a0; }
   #startScreen .vol-row { display:flex; align-items:center; gap:8px;
                            color:#cfc; font-size:16px; min-width:240px; }
   #startScreen .vol-row input[type=range] { flex:1; }
@@ -171,7 +173,8 @@
                  min-height:38px; }
   /* Door button uses a text label rather than a symbol — make it fit. */
   #btnDoor { font-size:13px; }
-  /* Descend button glow + pulse when the player is standing on stairs. */
+  /* Descend / Vendor buttons get the same green-glow pulse when usable. */
+  #btnVendor.available,
   .dpad button.available {
     background:#063;
     color:#aaffaa;
@@ -264,7 +267,7 @@
     <button id="btnPlayAgain">Play Again (Space)</button>
   </div>
   <div id="startScreen">
-    <img src="docs/splash.svg" alt="gridiron-dungeon" />
+    <img src="docs/splash_collage.png" alt="grid-A-Iron Dungeon" />
     <div class="vol-row">Music
       <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.5" />
     </div>
@@ -292,6 +295,7 @@
       <button id="btnBack"   title="Backward (S)">↓</button>
       <button id="btnStairs" title="Descend stairs (Space)">▼</button>
     </div>
+    <button id="btnVendor" style="margin-top:6px; display:none;">Vendor (V)</button>
   </div>
 </div>
 </div>
@@ -1487,6 +1491,11 @@ function refreshUI(){
   const stairsBtn = document.getElementById('btnStairs');
   stairsBtn.disabled = !c.stairs || !!state.combat;
   stairsBtn.classList.toggle('available', !!c.stairs && !state.combat);
+  const vendorBtn = document.getElementById('btnVendor');
+  if(vendorBtn){
+    vendorBtn.style.display = c.npc ? '' : 'none';
+    vendorBtn.classList.toggle('available', !!c.npc && !state.combat);
+  }
 }
 
 // -------- death sequence --------
@@ -1682,6 +1691,7 @@ document.getElementById('btnStairs').onclick= descendStairs;
 document.getElementById('btnInventory').onclick = toggleInventoryOverlay;
 document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
 document.getElementById('btnVendorClose').onclick = closeVendorOverlay;
+document.getElementById('btnVendor').onclick      = toggleVendorOverlay;
 document.getElementById('btnPlayAgain').onclick = restartGameAfterDeath;
 
 // Movement keys auto-repeat at our own rate so the player isn't blocked

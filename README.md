@@ -1,6 +1,6 @@
-# gridiron-dungeon
+# grid-A-Iron Dungeon
 
-![gridiron-dungeon splash](docs/splash.svg)
+![grid-A-Iron Dungeon splash](docs/splash_collage.png)
 
 Live demo (ephemeral ngrok tunnel — only up while my dev box is running it):
 **https://306e-2600-4040-219a-1a00-6f5e-71b-9aa1-ef2.ngrok-free.app**
