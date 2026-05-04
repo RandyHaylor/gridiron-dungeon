@@ -109,9 +109,14 @@
                   align-items:center; justify-content:center; gap:14px;
                   font-family:"VT323","Courier New",monospace; }
   #startScreen[hidden] { display:none !important; }
-  /* Splash graphic sized to cover the 3D viewport region (400x300). */
-  #startScreen img { width:400px; height:300px; image-rendering:pixelated;
-                      border:1px solid #0a0; }
+  /* Text-only title on the start screen (no splash image). */
+  #startTitle { text-align:center; line-height:1.05; }
+  #startTitle .big { font-size:48px; color:#9bff9b;
+                      text-shadow: 0 0 6px #060, 0 0 14px #030;
+                      letter-spacing:2px; }
+  #startTitle .sub { font-size:38px; color:#ffd34d;
+                      text-shadow: 0 0 6px #420, 0 0 14px #210;
+                      letter-spacing:6px; margin-top:4px; }
   #startScreen .vol-row { display:flex; align-items:center; gap:8px;
                            color:#cfc; font-size:16px; min-width:240px; }
   #startScreen .vol-row input[type=range] { flex:1; }
@@ -295,7 +300,10 @@
     <button id="btnPlayAgain">Play Again (Space)</button>
   </div>
   <div id="startScreen">
-    <img src="docs/splash_collage.png" alt="grid-A-Iron Dungeon" />
+    <div id="startTitle">
+      <div class="big">grid-A-Iron</div>
+      <div class="sub">DUNGEON</div>
+    </div>
     <div class="vol-row">Music
       <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.25" />
     </div>
@@ -1201,6 +1209,11 @@ function combatAttack(){
         state.stats.enemiesKilled += 1;
         log(`The ${e.name} crumples to the floor!`);
         const cellRef = state.combat.cellRef;
+        // Loot drop: 50/50 gold or herb, dropped into the cell's
+        // items list so the player can Take it.
+        const drop = (Math.random() < 0.5) ? 'Gold (5gp)' : 'Healing Herb';
+        cellRef.items.push(drop);
+        log(`It drops ${drop}.`);
         state.combat = null;
         state.combatBusy = false;
         const dyingObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
@@ -1531,7 +1544,7 @@ function triggerPlayerDeath(){
   if(state.dead) return;
   state.dead = true;
   state.deathStartTs = performance.now();
-  playSfx('death_sting');
+  fadeOutMusicThenPlayDeathSting();
   state.combat = null;
   state.combatBusy = false;
   state.pendingAction = null;
@@ -1866,6 +1879,30 @@ function setMusicVolume(v){
 }
 function setSfxVolume(v){
   audioSfxVolume = v;
+}
+// Quickly fade out background music, then fire the death sting once
+// it's silent. Used by triggerPlayerDeath so the music doesn't fight
+// the sting cue.
+function fadeOutMusicThenPlayDeathSting(){
+  const startVol = audioMusicEl ? audioMusicEl.volume : 0;
+  const fadeDurMs = 350;
+  const startTs = performance.now();
+  const tick = ()=>{
+    const t = (performance.now() - startTs) / fadeDurMs;
+    if(!audioMusicEl || t >= 1){
+      if(audioMusicEl){
+        audioMusicEl.volume = 0;
+        try { audioMusicEl.pause(); } catch(_){}
+        // Stop the auto-pick-next on ended.
+        audioMusicEl.onended = null;
+      }
+      playSfx('death_sting');
+      return;
+    }
+    audioMusicEl.volume = startVol * (1 - t);
+    requestAnimationFrame(tick);
+  };
+  tick();
 }
 function playSfx(category){
   if(!audioStarted) return;
