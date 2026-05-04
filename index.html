@@ -2170,33 +2170,44 @@ function applyTorchLightingEffects(){
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
   }
-  // Lit: standard point-light + fog. Flicker when charges < 10.
-  let intensity = 1.6, distance = CELL * 3;
+  // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
+  // 'lit' and 'no-torch' params in sync with the sprite's black/normal
+  // toggle, so the room dips to the torch-out look during dark frames.
   if(charges < 10){
     if(now >= _flicker.nextRollTs) _rollFlickerValues(now);
-    intensity *= _flicker.lightMul;
     if(lh){
-      // Stop the slow fade so flicker reads as a hard cut.
       lh.style.transition = 'none';
       lh.style.opacity = '1';
-      // Black silhouette frame vs normal frame. brightness(0) makes the
-      // sprite render as fully dark; brightness(1) is unmodified.
       lh.style.filter = _flicker.spriteDark ? 'brightness(0)' : 'brightness(1)';
     }
-  } else {
-    // Steady lit: full opacity, smooth fade transition restored.
-    if(lh){
-      lh.style.transition = '';
-      lh.style.opacity = '1';
-      lh.style.filter = '';
+    if(_flicker.spriteDark){
+      // Match the no-torch params one-for-one.
+      if(torch){ torch.intensity = 0.12; torch.distance = CELL * 1.15; }
+      if(scene && scene.fog){
+        scene.fog.near = CELL * 0.5 + centerBias;
+        scene.fog.far  = CELL * 1.6 + centerBias;
+      }
+    } else {
+      // Lit frame.
+      if(torch){ torch.intensity = 1.6; torch.distance = CELL * 3; }
+      if(scene && scene.fog){
+        scene.fog.near = CELL * 0.5 + centerBias;
+        scene.fog.far  = CELL * 2.6 + centerBias;
+      }
     }
+    return;
   }
-  if(torch){ torch.intensity = intensity; torch.distance = distance; }
+  // Steady lit (charges >= 10): full opacity, smooth fade transition restored.
+  if(lh){
+    lh.style.transition = '';
+    lh.style.opacity = '1';
+    lh.style.filter = '';
+  }
+  if(torch){ torch.intensity = 1.6; torch.distance = CELL * 3; }
   if(scene && scene.fog){
-    scene.fog.near = CELL * 0.5 + centerBias; // ~3.6
-    scene.fog.far  = CELL * 2.6 + centerBias; // ~12.0
+    scene.fog.near = CELL * 0.5 + centerBias;
+    scene.fog.far  = CELL * 2.6 + centerBias;
   }
-  if(lh) lh.style.opacity = '1';
 }
 
 function bobEnemiesInPlace(now){
