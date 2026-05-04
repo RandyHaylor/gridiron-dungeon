@@ -68,13 +68,9 @@
     100% { opacity:0; transform:translateY(-40px); }
   }
   #playerDamageNum.show { animation: playerDamageNumKf 700ms ease-out forwards; }
-  /* Vignette overlay used during no-torch mode. */
-  #darkVignette { position:absolute; inset:0; pointer-events:none;
-                   z-index:6; opacity:0; transition: opacity 300ms ease;
-                   background: radial-gradient(circle at 50% 55%,
-                     transparent 18%, rgba(0,0,0,0.55) 45%,
-                     rgba(0,0,0,0.92) 75%, #000 100%); }
-  #darkVignette.active { opacity:1; }
+  /* #darkVignette removed — was producing a fake flashlight-forward
+     effect by darkening the screen corners. */
+  #darkVignette { display:none !important; }
   /* Attack swing: slash sword down and in front (toward screen center)
      in combination with the camera yaw rotation, then snap back.
      Combined duration tracks the JS PLAYER_SWING_TOTAL_MS. */
