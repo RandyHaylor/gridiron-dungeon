@@ -590,12 +590,20 @@ function initThree(){
   renderer = new THREE.WebGLRenderer({ antialias:false });
   renderer.setPixelRatio(1);
   renderer.setSize(VIEW_W, VIEW_H);
+  // Use physically-correct light units (not legacy). With this set,
+  // PointLight intensity is in lumens-style values and decay=2 gives
+  // a real inverse-square falloff. We keep this on so behavior matches
+  // the three.js docs the user pasted.
+  renderer.useLegacyLights = false;
   document.getElementById('game').appendChild(renderer.domElement);
 
-  const amb = new THREE.AmbientLight(0xffffff, 0.5);
+  // Soft ambient fill so unlit pixels aren't pure black.
+  const amb = new THREE.AmbientLight(0xffeedd, 0.35);
   amb.name = 'ambient';
   scene.add(amb);
-  const torch = new THREE.PointLight(0xffaa66, 1.6, CELL*3, 2);
+  // Omnidirectional point light. Intensity / distance / decay are
+  // adjusted live by applyTorchLightingEffects.
+  const torch = new THREE.PointLight(0xffaa66, 60, CELL*4, 2);
   torch.name='torch';
   scene.add(torch);
 }
@@ -2203,64 +2211,40 @@ function _rollFlickerValues(now){
 // the player's remaining torch charges. Also flickers when low.
 function applyTorchLightingEffects(){
   const torch = scene && scene.getObjectByName('torch');
+  const ambLight = scene && scene.getObjectByName('ambient');
   const charges = state.player.torchCharges;
   const lh = document.querySelector('.hand.left');
-  // Fog distances are camera-relative in three.js, but the camera is
-  // offset PLAYER_BACK_OFFSET behind the room center. Add that offset
-  // to all near/far values so the fog gradient reads as anchored to
-  // the room center instead of the player's eyepoint.
+  // Anchor the omnidirectional point light at the player's CELL CENTER.
+  // (The camera rides ~PLAYER_BACK_OFFSET behind center; pinning the
+  // light at center means the wall illumination doesn't slide around
+  // when the camera tweens or arcs through a rotation.)
+  if(torch && state.dungeon){
+    const cx = state.player.x * CELL + CELL/2;
+    const cz = state.player.y * CELL + CELL/2;
+    torch.decay = 2;
+    torch.position.set(cx, WALL_H * 0.55, cz);
+  }
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: same lit-mode shape (camera-anchored fog, BFS=0 cell)
-    // with one tweak — the point-light POSITION is anchored at the
-    // player's cell CENTER instead of the camera. Camera still rides
-    // the 0.4-cell back offset, but the light doesn't, so when the
-    // player rotates, the same pixels stay equally lit (no left/right
-    // wall dimming or shadow flicker).
-    // Anchor the light at PLAYER_BACK_OFFSET in front of the camera:
-    // the camera always points toward room center, so this puts the
-    // light at the room center while the camera tweens through a move
-    // or arcs around it during a rotation. Net effect: light tracks
-    // smoothly at exactly the same rate as the camera, no jumps.
-    if(torch){
-      const fwdX = -Math.sin(camera.rotation.y);
-      const fwdZ = -Math.cos(camera.rotation.y);
-      // decay=1 (linear-ish) instead of three.js default=2 (inverse-square)
-      // so the light actually reaches the walls at distance 2 from center.
-      torch.decay     = 1;
-      torch.intensity = 1.0;
-      torch.distance  = CELL * 1.5; // 6 — walls at 2 get ~67% intensity
-      torch.position.set(
-        camera.position.x + fwdX * PLAYER_BACK_OFFSET,
-        WALL_H * 0.55,
-        camera.position.z + fwdZ * PLAYER_BACK_OFFSET
-      );
-    }
-    // fog.near still past the cell's far wall (so all own-room walls
-    // live in the no-fog zone and rotation does not dim them); fog.far
-    // pulled in tight so neighbors fade to black quickly.
+    // Torch out: weak point light (just enough to see the cell), darker
+    // ambient, vignette on. Light remains anchored at cell center so
+    // every wall's brightness profile is symmetric around its midpoint.
+    if(torch){ torch.intensity = 8; torch.distance = CELL * 1.6; }
+    if(ambLight) ambLight.intensity = 0.10;
     if(scene && scene.fog){
-      // Window narrow: between own-cell far wall (~3.6 from camera) and
-      // side-neighbor cell center (sqrt(4² + 1.6²) ≈ 4.31). Anything at
-      // or past 4.2 — including ALL neighbor content (front, side,
-      // diagonal) — is fully black, occluding it.
-      scene.fog.near = CELL * 0.95; // 3.8 — own walls still all clear
-      scene.fog.far  = CELL * 1.05; // 4.2 — past side-neighbor distance
+      scene.fog.near = CELL * 0.95;
+      scene.fog.far  = CELL * 1.4;
     }
-    // Lower ambient so unlit pixels read as much darker.
-    const amb0 = scene && scene.getObjectByName('ambient');
-    if(amb0) amb0.intensity = 0.15;
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     const vig = document.getElementById('darkVignette');
     if(vig) vig.classList.add('active');
     return;
   }
-  // Torch lit — ensure ambient is back to its standard level.
+  // Torch lit — vignette off, ambient at fill level.
   const vigOff = document.getElementById('darkVignette');
   if(vigOff) vigOff.classList.remove('active');
-  const amb = scene && scene.getObjectByName('ambient');
-  if(amb) amb.intensity = 0.5;
+  if(ambLight) ambLight.intensity = 0.35;
   // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
   // 'lit' and 'no-torch' params in sync with the sprite's black/normal
   // toggle, so the room dips to the torch-out look during dark frames.
@@ -2272,15 +2256,17 @@ function applyTorchLightingEffects(){
       lh.style.filter = _flicker.spriteDark ? 'brightness(0)' : 'brightness(1)';
     }
     if(_flicker.spriteDark){
-      // Match the no-torch params one-for-one (dimmer + fuzzier).
-      if(torch){ torch.intensity = 0.08; torch.distance = CELL * 0.9; }
+      // Match the no-torch params one-for-one (dimmer).
+      if(torch){ torch.intensity = 8; torch.distance = CELL * 1.6; }
+      if(ambLight) ambLight.intensity = 0.10;
       if(scene && scene.fog){
-        scene.fog.near = CELL * 0.4;
-        scene.fog.far  = CELL * 1.4 + centerBias;
+        scene.fog.near = CELL * 0.95;
+        scene.fog.far  = CELL * 1.4;
       }
     } else {
       // Lit frame.
-      if(torch){ torch.intensity = 1.6; torch.distance = CELL * 3; }
+      if(torch){ torch.intensity = 60; torch.distance = CELL * 4; }
+      if(ambLight) ambLight.intensity = 0.35;
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.5 + centerBias;
         scene.fog.far  = CELL * 2.6 + centerBias;
@@ -2294,7 +2280,7 @@ function applyTorchLightingEffects(){
     lh.style.opacity = '1';
     lh.style.filter = '';
   }
-  if(torch){ torch.intensity = 1.6; torch.distance = CELL * 3; }
+  if(torch){ torch.intensity = 60; torch.distance = CELL * 4; }
   if(scene && scene.fog){
     scene.fog.near = CELL * 0.5 + centerBias;
     scene.fog.far  = CELL * 2.6 + centerBias;
