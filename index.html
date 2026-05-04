@@ -84,6 +84,23 @@
                        padding:10px; box-sizing:border-box; z-index:50;
                        display:flex; flex-direction:column; gap:6px; }
   #inventoryOverlay[hidden] { display:none !important; }
+  /* Hamburger settings button: top-left of the wrap, always present
+     above all other UI (below only the start screen / death overlay). */
+  #hamburgerBtn { position:absolute; top:6px; left:6px; z-index:90;
+                   background:rgba(0,0,0,0.65); color:#9f9;
+                   border:1px solid #0a0; font-size:18px; line-height:1;
+                   padding:4px 8px; cursor:pointer; }
+  #settingsOverlay { position:absolute; left:0; right:0; top:0; bottom:0;
+                      background:rgba(0,0,0,0.96); border-top:2px solid #0f0;
+                      padding:12px; box-sizing:border-box; z-index:95;
+                      display:flex; flex-direction:column; gap:10px;
+                      font-family:"VT323","Courier New",monospace; }
+  #settingsOverlay[hidden] { display:none !important; }
+  #settingsHeader { color:#9f9; letter-spacing:1px;
+                     border-bottom:1px solid #0a0; padding-bottom:4px; }
+  #settingsOverlay .settings-row { display:flex; align-items:center;
+                                    gap:8px; color:#cfc; font-size:16px; }
+  #settingsOverlay .settings-row input[type=range] { flex:1; }
   /* Start screen with splash + volume sliders. Required user-gesture
      before any audio plays. */
   #startScreen { position:absolute; left:0; right:0; top:0; bottom:0;
@@ -226,6 +243,17 @@
 </head>
 <body>
 <div id="wrap">
+<button id="hamburgerBtn" title="Settings" aria-label="Settings">&#9776;</button>
+<div id="settingsOverlay" hidden>
+  <div id="settingsHeader">SETTINGS <span style="font-size:11px;opacity:.7;">(Close to dismiss)</span></div>
+  <div class="settings-row">Music
+    <input type="range" id="settingsMusicVolSlider" min="0" max="1" step="0.01" value="0.25" />
+  </div>
+  <div class="settings-row">SFX
+    <input type="range" id="settingsSfxVolSlider"   min="0" max="1" step="0.01" value="0.35" />
+  </div>
+  <button id="btnSettingsClose" style="margin-top:8px;">Close</button>
+</div>
 <div id="game">
   <!-- Held items: clipped against game viewport bottom so only the
        upper portion of the held sprite peeks up like a Doom-era HUD. -->
@@ -269,10 +297,10 @@
   <div id="startScreen">
     <img src="docs/splash_collage.png" alt="grid-A-Iron Dungeon" />
     <div class="vol-row">Music
-      <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.5" />
+      <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.25" />
     </div>
     <div class="vol-row">SFX
-      <input type="range" id="sfxVolSlider"   min="0" max="1" step="0.01" value="0.7" />
+      <input type="range" id="sfxVolSlider"   min="0" max="1" step="0.01" value="0.35" />
     </div>
     <button id="btnStartGame">Enter Dungeon</button>
   </div>
@@ -1815,8 +1843,8 @@ const SFX_BANK = {
   herb_collect:   sfxList('herb_collect',   'herb_collect',   4),
   herb_take:      sfxList('herb_take',      'herb_take',      4),
 };
-let audioMusicVolume = 0.5;
-let audioSfxVolume   = 0.7;
+let audioMusicVolume = 0.25; // half of previous 0.5
+let audioSfxVolume   = 0.35; // half of previous 0.7
 let audioMusicEl     = null;
 let audioStarted     = false;
 
@@ -1859,8 +1887,42 @@ function dismissStartScreen(){
   startBackgroundMusic();
 }
 document.getElementById('btnStartGame').onclick = dismissStartScreen;
-document.getElementById('musicVolSlider').oninput = (e)=> setMusicVolume(parseFloat(e.target.value));
-document.getElementById('sfxVolSlider').oninput   = (e)=> setSfxVolume(parseFloat(e.target.value));
+function syncMusicSlidersToValue(v){
+  const a = document.getElementById('musicVolSlider');
+  const b = document.getElementById('settingsMusicVolSlider');
+  if(a) a.value = String(v);
+  if(b) b.value = String(v);
+}
+function syncSfxSlidersToValue(v){
+  const a = document.getElementById('sfxVolSlider');
+  const b = document.getElementById('settingsSfxVolSlider');
+  if(a) a.value = String(v);
+  if(b) b.value = String(v);
+}
+document.getElementById('musicVolSlider').oninput = (e)=>{
+  const v = parseFloat(e.target.value); setMusicVolume(v); syncMusicSlidersToValue(v);
+};
+document.getElementById('sfxVolSlider').oninput   = (e)=>{
+  const v = parseFloat(e.target.value); setSfxVolume(v); syncSfxSlidersToValue(v);
+};
+document.getElementById('settingsMusicVolSlider').oninput = (e)=>{
+  const v = parseFloat(e.target.value); setMusicVolume(v); syncMusicSlidersToValue(v);
+};
+document.getElementById('settingsSfxVolSlider').oninput = (e)=>{
+  const v = parseFloat(e.target.value); setSfxVolume(v); syncSfxSlidersToValue(v);
+};
+function openSettingsOverlay(){
+  document.getElementById('settingsOverlay').hidden = false;
+}
+function closeSettingsOverlay(){
+  document.getElementById('settingsOverlay').hidden = true;
+}
+function toggleSettingsOverlay(){
+  const ov = document.getElementById('settingsOverlay');
+  if(ov.hidden) openSettingsOverlay(); else closeSettingsOverlay();
+}
+document.getElementById('hamburgerBtn').onclick = toggleSettingsOverlay;
+document.getElementById('btnSettingsClose').onclick = closeSettingsOverlay;
 
 // -------- main --------
 initThree();
