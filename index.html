@@ -292,7 +292,10 @@
   <div class="panel" id="combatPanel">
     <div id="statusGrid"></div>
     <div id="combatActions"></div>
-    <button id="btnInventory" style="margin-top:4px;">Inventory (I)</button>
+    <div id="combatPanelButtons" style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap;">
+      <button id="btnInventory">Inventory (I)</button>
+      <button id="btnVendor" style="display:none;">Vendor (V)</button>
+    </div>
   </div>
   <div id="deathOverlay" hidden>
     <div id="deathMsg">one more skeleton for my army...</div>
@@ -331,7 +334,6 @@
       <button id="btnBack"   title="Backward (S)">↓</button>
       <button id="btnStairs" title="Descend stairs (Space)">▼</button>
     </div>
-    <button id="btnVendor" style="margin-top:6px; display:none;">Vendor (V)</button>
   </div>
 </div>
 </div>
@@ -415,11 +417,24 @@ function makeLevel(level){
   do { sx=ri(W_); sy=ri(H_); } while(Math.abs(sx-px)+Math.abs(sy-py) < 6);
   cellAt(sx,sy).stairs=true;
 
-  // Sprinkle items. Sword tier gates by dungeon level: rusty always,
-  // iron from L4, steel from L6.
-  const itemsPool = ['Healing Herb','Gold (5gp)','Torch','Rusty Shield','Rusty Sword'];
-  if(level >= 4) itemsPool.push('Iron Sword');
-  if(level >= 6) itemsPool.push('Steel Sword');
+  // Exactly one sword and one shield per floor; tier gated by level.
+  let swordToSpawn  = (level >= 6) ? 'Steel Sword'  : (level >= 4 ? 'Iron Sword'  : 'Rusty Sword');
+  let shieldToSpawn = (level >= 6) ? 'Steel Shield' : (level >= 4 ? 'Iron Shield' : 'Rusty Shield');
+  function placeUniqueFloorItem(name){
+    for(let attempt=0; attempt<60; attempt++){
+      const ix=ri(W_), iy=ri(H_);
+      if(ix===px && iy===py) continue;
+      const c = cellAt(ix,iy);
+      if(!c || c.stairs) continue;
+      c.items.push(name);
+      return true;
+    }
+    return false;
+  }
+  placeUniqueFloorItem(swordToSpawn);
+  placeUniqueFloorItem(shieldToSpawn);
+  // Sprinkle other floor items (no swords/shields here).
+  const itemsPool = ['Healing Herb','Gold (5gp)','Torch'];
   for(let i=0;i<5;i++){
     const c = cells[ri(H_)][ri(W_)];
     if(c.stairs) continue;
@@ -447,15 +462,25 @@ function makeLevel(level){
     c.enemy = { ...t, hpMax:t.hp };
   }
 
-  // Place exactly one friendly Vendor in a random non-start, non-stairs,
-  // non-enemy cell so every level has a place to buy supplies.
-  for(let attempt=0; attempt<30; attempt++){
-    const vx = ri(W_), vy = ri(H_);
-    if(vx===px && vy===py) continue;
-    const c = cellAt(vx, vy);
-    if(c.stairs || c.enemy) continue;
-    c.npc = { name: 'Vendor' };
-    break;
+  // Vendor: only on even floors (2, 4, 6, ...). Placed in the 3x3
+  // around the player's start cell, never on the start cell itself,
+  // never on stairs, and not on any enemy cell.
+  if(level % 2 === 0){
+    const candidates = [];
+    for(let dy=-1; dy<=1; dy++){
+      for(let dx=-1; dx<=1; dx++){
+        if(dx===0 && dy===0) continue;
+        const vx = px+dx, vy = py+dy;
+        if(vx<0 || vy<0 || vx>=W_ || vy>=H_) continue;
+        const c = cellAt(vx, vy);
+        if(!c || c.stairs || c.enemy) continue;
+        candidates.push(c);
+      }
+    }
+    if(candidates.length){
+      const pick = candidates[ri(candidates.length)];
+      pick.npc = { name: 'Vendor' };
+    }
   }
 
   return { W_, H_, cells, px, py };
@@ -578,6 +603,8 @@ const ITEM_SPRITE_PATH = {
   'Iron Sword':   'sprites/item_iron_sword.png',
   'Steel Sword':  'sprites/item_steel_sword.png',
   'Rusty Shield': 'sprites/item_rusty_shield.png',
+  'Iron Shield':  'sprites/item_iron_shield.png',
+  'Steel Shield': 'sprites/item_steel_shield.png',
   'Healing Herb': 'sprites/item_healing_herb.png',
   'Torch':        'sprites/item_torch.png',
 };
@@ -1109,6 +1136,8 @@ const CONSUMABLE_GUARDS = {
 // the previous one onto the floor.
 const SHIELD_STATS = {
   'Rusty Shield': 1,
+  'Iron Shield':  2,
+  'Steel Shield': 3,
 };
 
 function pickUpItem(idx){
