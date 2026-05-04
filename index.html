@@ -630,13 +630,18 @@ function rotate(delta){
   if(state.anim){ return; }
   if(state.combat){ log("Not while fighting!"); return; }
   const p = state.player;
-  const fromYaw = yawForDir(p.dir);
+  const oldDir = p.dir;
+  const fromYaw = yawForDir(oldDir);
+  // Capture the OLD-dir back-wall pose BEFORE mutating p.dir so the
+  // position can lerp from "near old back wall" to "near new back wall"
+  // alongside the yaw lerp. (Previous bug: snapped position on first frame.)
+  const fromPos = cameraPosForCellAndDir(p.x, p.y, oldDir);
   p.dir = ((p.dir + delta) % 4 + 4) % 4;
   const toYaw = fromYaw + shortestYawDelta(fromYaw, yawForDir(p.dir));
-  const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  const toPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
   state.anim = {
     kind:'rotate', startTs: performance.now(), durMs: ANIM_DURATION_MS,
-    fromPos, toPos: fromPos, fromYaw, toYaw,
+    fromPos, toPos, fromYaw, toYaw,
     onDone: ()=>{ refreshUI(); }
   };
   // Render with new dir so any newly-visible next-ahead room is in scene
