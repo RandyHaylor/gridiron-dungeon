@@ -2125,7 +2125,7 @@ function applyTorchLightingEffects(){
   }
   // Lit: standard point-light + fog. Flicker when charges < 5.
   let intensity = 1.6, distance = CELL * 3;
-  if(charges < 5){
+  if(charges < 10){
     intensity *= 0.55 + Math.random() * 0.55; // 0.55..1.10x of base
     if(Math.random() < 0.18){
       // Brief darker dip — scene gets noticeably dimmer.
