@@ -2189,14 +2189,19 @@ function applyTorchLightingEffects(){
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: SAME mechanism as lit mode (camera-anchored point
-    // light + camera-anchored fog), just scaled down to a 1x1 bubble.
-    // The loop's setCameraToCellAndDir/tickAnimation already keeps the
-    // point light riding the camera, so we only adjust intensity/range
-    // and fog distances; we do NOT override torch.position. Fog shape
-    // mirrors the lit mode (near≈room-center distance, far just past
-    // own walls). BFS radius is 0 so neighbor cells aren't rendered.
-    if(torch){ torch.intensity = 0.5; torch.distance = CELL * 1.0; }
+    // Torch out: same lit-mode shape (camera-anchored fog, BFS=0 cell)
+    // with one tweak — the point-light POSITION is anchored at the
+    // player's cell CENTER instead of the camera. Camera still rides
+    // the 0.4-cell back offset, but the light doesn't, so when the
+    // player rotates, the same pixels stay equally lit (no left/right
+    // wall dimming or shadow flicker).
+    const cellCenterX = state.player.x * CELL + CELL/2;
+    const cellCenterZ = state.player.y * CELL + CELL/2;
+    if(torch){
+      torch.intensity = 0.5;
+      torch.distance  = CELL * 1.0;
+      torch.position.set(cellCenterX, WALL_H * 0.55, cellCenterZ);
+    }
     if(scene && scene.fog){
       scene.fog.near = centerBias;             // ~1.6 (room-center distance)
       scene.fog.far  = CELL * 0.7 + centerBias; // ~4.4 (just past own walls)
