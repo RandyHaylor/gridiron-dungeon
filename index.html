@@ -909,6 +909,14 @@ const CONSUMABLES = {
     return `You eat a Healing Herb. HP +${p.hp - before} (now ${p.hp}/${p.hpMax}).`;
   }
 };
+// Optional guards: if guard returns a string, the consumable is NOT consumed
+// and the string is logged instead. Lets us refuse to waste a herb at full HP.
+const CONSUMABLE_GUARDS = {
+  'Healing Herb': (p)=>{
+    if(p.hp >= p.hpMax) return "You're too healthy to waste a healing herb...";
+    return null;
+  }
+};
 // Shields table: name -> damage reduction (subtracted from incoming hits).
 // Same single-slot rules as weapons: picking up a different shield drops
 // the previous one onto the floor.
@@ -1336,6 +1344,15 @@ function renderInventoryOverlay(){
 function useConsumableByName(name){
   const idx = state.player.inv.indexOf(name);
   if(idx < 0) return;
+  // Refusal guard: don't consume if conditions don't allow it.
+  const guard = CONSUMABLE_GUARDS[name];
+  if(guard){
+    const refusal = guard(state.player);
+    if(refusal){
+      log(refusal);
+      return;
+    }
+  }
   state.player.inv.splice(idx, 1);
   const fn = CONSUMABLES[name];
   if(fn){
