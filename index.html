@@ -1686,7 +1686,8 @@ function restartGameAfterDeath(){
 // Stock list: { name, price, kind } — kind 'consumable' lands in inv as
 // usable Healing Herb (existing CONSUMABLES table handles it).
 const VENDOR_STOCK = [
-  { name: 'Healing Herb', price: 3, kind: 'consumable' },
+  { name: 'Healing Herb', price: 5,  kind: 'consumable' },
+  { name: 'Torch',        price: 10, kind: 'spare'      },
 ];
 function renderVendorOverlay(){
   const list = document.getElementById('vendorItemList');
