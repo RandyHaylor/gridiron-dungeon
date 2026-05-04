@@ -865,39 +865,10 @@ function drawRoom(c, gx, gy){
 }
 
 function drawWall(w, dir, ox, oz, c){
-  // Wall plane positioned at the appropriate side of cell
-  let cx=ox+CELL/2, cz=oz+CELL/2, rotY=0, dx=0, dz=0;
-  if(dir===N){ dz=-CELL/2; rotY=0; }
-  if(dir===S){ dz=+CELL/2; rotY=Math.PI; }
-  if(dir===E){ dx=+CELL/2; rotY=-Math.PI/2; }
-  if(dir===W){ dx=-CELL/2; rotY=Math.PI/2; }
-  const px=cx+dx, pz=cz+dz;
-
-  if(w.type==='wall'){
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H), matWall);
-    m.position.set(px, WALL_H/2, pz); m.rotation.y = rotY;
-    dungeonGroup.add(m);
-  } else if(w.type==='door'){
-    // doorway frame (top) and door panel
-    const frame = new THREE.Mesh(new THREE.PlaneGeometry(CELL, WALL_H*0.25), matWall);
-    frame.position.set(px, WALL_H*0.875, pz); frame.rotation.y=rotY;
-    dungeonGroup.add(frame);
-    if(!w.open){
-      const door = new THREE.Mesh(new THREE.PlaneGeometry(CELL*0.6, WALL_H*0.75), matDoorClosed);
-      door.position.set(px, WALL_H*0.375, pz); door.rotation.y=rotY;
-      dungeonGroup.add(door);
-    }
-    // side fillers
-    const filler1 = new THREE.Mesh(new THREE.PlaneGeometry(CELL*0.2, WALL_H*0.75), matWall);
-    const filler2 = filler1.clone();
-    const ax = (rotY===0||Math.abs(rotY)===Math.PI) ? CELL*0.4 : 0;
-    const az = (rotY===0||Math.abs(rotY)===Math.PI) ? 0 : CELL*0.4;
-    filler1.position.set(px-ax, WALL_H*0.375, pz-az); filler1.rotation.y=rotY;
-    filler2.position.set(px+ax, WALL_H*0.375, pz+az); filler2.rotation.y=rotY;
-    dungeonGroup.add(filler1, filler2);
-  } else {
-    // open passage: render nothing — just a clear opening between rooms.
-  }
+  // DIAGNOSTIC: all wall/door planes disabled so the player can see
+  // through the world to confirm where the omnidirectional torch
+  // light's flame-marker sphere is actually positioned.
+  return;
 }
 
 // ----- camera pose helpers (kept identical between snap and tween) -----
