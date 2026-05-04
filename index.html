@@ -1624,7 +1624,11 @@ function refreshUI(){
   document.getElementById('btnFwd').disabled = !!state.combat;
   document.getElementById('btnLeft').disabled = !!state.combat;
   document.getElementById('btnRight').disabled = !!state.combat;
-  document.getElementById('btnDoor').disabled = !!state.combat || (c.walls[p.dir].type!=='door');
+  const doorBtn = document.getElementById('btnDoor');
+  const wallAhead = c.walls[p.dir];
+  doorBtn.disabled = !!state.combat || wallAhead.type !== 'door';
+  doorBtn.textContent = (wallAhead.type === 'door' && wallAhead.open)
+    ? 'Close Door (E)' : 'Open Door (E)';
   const stairsBtn = document.getElementById('btnStairs');
   stairsBtn.disabled = !c.stairs || !!state.combat;
   stairsBtn.classList.toggle('available', !!c.stairs && !state.combat);
