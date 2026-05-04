@@ -593,8 +593,9 @@ function initThree(){
   renderer.useLegacyLights = false;
   document.getElementById('game').appendChild(renderer.domElement);
 
-  // Soft ambient fill so unlit pixels aren't pure black.
-  const amb = new THREE.AmbientLight(0xffeedd, 0.35);
+  // Ambient light disabled — only the omnidirectional torch point
+  // light contributes illumination. Unlit pixels render pure black.
+  const amb = new THREE.AmbientLight(0xffeedd, 0);
   amb.name = 'ambient';
   scene.add(amb);
   // Omnidirectional point light. Intensity / distance / decay are
@@ -2248,7 +2249,7 @@ function applyTorchLightingEffects(){
     // ambient, vignette on. Light remains anchored at cell center so
     // every wall's brightness profile is symmetric around its midpoint.
     if(torch){ torch.intensity = 8; torch.distance = CELL * 1.6; }
-    if(ambLight) ambLight.intensity = 0.10;
+    if(ambLight) ambLight.intensity = 0;
     if(scene && scene.fog){
       scene.fog.near = CELL * 0.95;
       scene.fog.far  = CELL * 1.4;
@@ -2261,7 +2262,7 @@ function applyTorchLightingEffects(){
   // Torch lit — vignette off, ambient at fill level.
   const vigOff = document.getElementById('darkVignette');
   if(vigOff) vigOff.classList.remove('active');
-  if(ambLight) ambLight.intensity = 0.35;
+  if(ambLight) ambLight.intensity = 0;
   // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
   // 'lit' and 'no-torch' params in sync with the sprite's black/normal
   // toggle, so the room dips to the torch-out look during dark frames.
@@ -2275,7 +2276,7 @@ function applyTorchLightingEffects(){
     if(_flicker.spriteDark){
       // Match the no-torch params one-for-one (dimmer).
       if(torch){ torch.intensity = 8; torch.distance = CELL * 1.6; }
-      if(ambLight) ambLight.intensity = 0.10;
+      if(ambLight) ambLight.intensity = 0;
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.95;
         scene.fog.far  = CELL * 1.4;
@@ -2283,7 +2284,7 @@ function applyTorchLightingEffects(){
     } else {
       // Lit frame.
       if(torch){ torch.intensity = 60; torch.distance = CELL * 4; }
-      if(ambLight) ambLight.intensity = 0.35;
+      if(ambLight) ambLight.intensity = 0;
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.5 + centerBias;
         scene.fog.far  = CELL * 2.6 + centerBias;
