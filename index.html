@@ -1039,6 +1039,17 @@ function combatAttack(){
         state.combat = null;
         state.combatBusy = false;
         const dyingObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
+        // Tear down any active phrase bubble for this enemy first; the
+        // phrase tick only processes enemies still inside dungeonGroup
+        // and the dying mesh is about to be detached to scene root.
+        if(e.currentPhraseSprite){
+          scene.remove(e.currentPhraseSprite);
+          if(e.currentPhraseSprite.material){
+            if(e.currentPhraseSprite.material.map) e.currentPhraseSprite.material.map.dispose();
+            e.currentPhraseSprite.material.dispose();
+          }
+          e.currentPhraseSprite = null;
+        }
         if(dyingObj){
           // Detach the dying mesh from dungeonGroup and re-parent it to
           // the scene root, so a renderVisibleRooms triggered by player
