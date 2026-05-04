@@ -1634,7 +1634,11 @@ function renderVendorOverlay(){
     label.textContent = `${item.name}  —  ${item.price}gp`;
     row.appendChild(label);
     const btn = document.createElement('button');
-    btn.textContent = `Buy (${item.price}gp)`;
+    // Only the FIRST stock row gets the "(B)" hotkey hint, since B
+    // buys whichever item is at the top of the vendor's listing.
+    btn.textContent = (list.children.length === 0)
+      ? `Buy (B) ${item.price}gp`
+      : `Buy (${item.price}gp)`;
     btn.disabled = state.player.gold < item.price;
     btn.onclick = ()=> buyFromVendor(item);
     row.appendChild(btn);
@@ -1803,6 +1807,13 @@ function dispatchKeyAction(key){
   }
   else if(key==='v'||key==='V'){
     toggleVendorOverlay();
+  }
+  else if(key==='b'||key==='B'){
+    // Buy from vendor: only when the vendor overlay is open.
+    const ov = document.getElementById('vendorOverlay');
+    if(ov && !ov.hidden && VENDOR_STOCK.length){
+      buyFromVendor(VENDOR_STOCK[0]);
+    }
   }
 }
 
