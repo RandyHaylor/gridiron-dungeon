@@ -30,13 +30,22 @@
   #game canvas { display:block; width:400px; height:300px; }
   /* Held-item HUD: anchored at the bottom of the 3D viewport, sprite
      pushed half off-screen so only the top peeks up (flame for torch,
-     blade tip for sword). overflow:hidden on #game clips the rest. */
-  .hand { position:absolute; bottom:-46px; width:96px; height:96px;
+     blade tip for sword). overflow:hidden on #game clips the rest.
+     Doubled size from 96 -> 192. */
+  .hand { position:absolute; bottom:-92px; width:192px; height:192px;
           pointer-events:none; image-rendering:pixelated; z-index:5; }
   .hand img { width:100%; height:100%; image-rendering:pixelated; display:block; }
-  .hand.left  { left:6px;  transform: rotate(-15deg); }
-  .hand.right { right:6px; transform: rotate(20deg); }
+  .hand.left  { left:0;    transform: rotate(-15deg); }
+  .hand.right { right:0;   transform: rotate(20deg); }
   .hand[hidden]{ display:none; }
+  /* Attack swing: weapon raises up then back down. Includes the static
+     rotate(20deg) on every keyframe so the rotation isn't lost. */
+  @keyframes attackSwingKf {
+    0%   { transform: rotate(20deg) translateY(0); }
+    50%  { transform: rotate(20deg) translateY(-44px); }
+    100% { transform: rotate(20deg) translateY(0); }
+  }
+  .hand.right.attackSwing { animation: attackSwingKf 280ms ease-in-out; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -294,8 +303,15 @@ const state = {
   // moment the current animation (and any chained follow-up) ends.
   // Latest press wins (overwrites any earlier pending action).
   pendingAction: null,
+  attackSwing:  null, // {startTs, durMs}
+  screenShake:  null, // {startTs, until, durMs, magnitude}
 };
-const ANIM_DURATION_MS = 500;
+const ANIM_DURATION_MS = 250;
+const ATTACK_SWING_DURATION_MS = 280;
+const SCREEN_SHAKE_DURATION_MS = 220;
+const SCREEN_SHAKE_MAGNITUDE = 0.18;
+const ENEMY_BOB_AMPLITUDE = 0.06;
+const ENEMY_BOB_PERIOD_MS = 600;
 
 function newLevel(level){
   const d = makeLevel(level);
@@ -513,15 +529,18 @@ function drawRoom(c, gx, gy){
       ez += ev[1] * CELL * 0.35;
     }
     const path = ENEMY_SPRITE_PATH[c.enemy.name];
+    let eObj;
     if(path){
-      const sp = makeBillboardSprite(path, 1.6);
-      sp.position.set(ex, 0.85, ez);
-      dungeonGroup.add(sp);
+      eObj = makeBillboardSprite(path, 1.6);
+      eObj.position.set(ex, 0.85, ez);
     } else {
-      const eMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
-      eMesh.position.set(ex, 0.8, ez);
-      dungeonGroup.add(eMesh);
+      eObj = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
+      eObj.position.set(ex, 0.8, ez);
     }
+    eObj.userData.isEnemy = true;
+    eObj.userData.baseY = eObj.position.y;
+    eObj.userData.bobPhase = Math.random() * Math.PI * 2;
+    dungeonGroup.add(eObj);
   }
 }
 
@@ -834,9 +853,21 @@ function pickUpItem(idx){
 // Player hit chance is 75% on every attack.
 const PLAYER_HIT_CHANCE = 0.75;
 
+function triggerAttackSwingAnimation(){
+  state.attackSwing = { startTs: performance.now(), durMs: ATTACK_SWING_DURATION_MS };
+  // CSS keyframe lifts the right-hand weapon sprite up then back down.
+  const rh = document.getElementById('rightHand');
+  if(rh && !rh.hidden){
+    rh.classList.remove('attackSwing');
+    void rh.offsetWidth; // force reflow so re-adding restarts the animation
+    rh.classList.add('attackSwing');
+  }
+}
+
 function combatAttack(){
   if(!state.combat) return;
   const e = state.combat.enemy;
+  triggerAttackSwingAnimation();
   if(R() >= PLAYER_HIT_CHANCE){
     log(`You swing at the ${e.name} and miss!`);
     enemyTurn();
@@ -894,6 +925,13 @@ function enemyTurn(){
   const dr = state.player.shield.dr;
   const dmg = Math.max(0, raw - dr);
   state.player.hp -= dmg;
+  if(dmg > 0){
+    const now = performance.now();
+    state.screenShake = {
+      startTs: now, until: now + SCREEN_SHAKE_DURATION_MS,
+      durMs: SCREEN_SHAKE_DURATION_MS, magnitude: SCREEN_SHAKE_MAGNITUDE
+    };
+  }
   if(dr > 0 && dmg < raw){
     log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
   } else {
@@ -1216,10 +1254,52 @@ function tickAnimation(now){
   }
 }
 
+// Per-frame ambient bob for enemy sprites (sin curve in world units).
+function bobEnemiesInPlace(now){
+  if(!dungeonGroup) return;
+  const w = (Math.PI * 2) / ENEMY_BOB_PERIOD_MS;
+  dungeonGroup.children.forEach(obj=>{
+    const u = obj.userData;
+    if(u && u.isEnemy && typeof u.baseY === 'number'){
+      obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * ENEMY_BOB_AMPLITUDE;
+    }
+  });
+}
+
+// 15-degree CCW-then-CW yaw bob layered on top of the camera's facing yaw.
+// Triggered on every player attack (hit or miss).
+function applyAttackSwingYawOffset(now){
+  const a = state.attackSwing;
+  if(!a) return;
+  const t = (now - a.startTs) / a.durMs;
+  if(t >= 1){ state.attackSwing = null; return; }
+  // -sin(2*pi*t)*15deg → 0,-15,0,+15,0 over t=[0,1] — quick CCW then CW.
+  const offsetRad = -Math.sin(2 * Math.PI * t) * (15 * Math.PI / 180);
+  camera.rotation.y += offsetRad;
+}
+
+// Screen shake: random offset on camera position, decays over duration.
+function applyScreenShake(now){
+  const s = state.screenShake;
+  if(!s) return;
+  if(now >= s.until){ state.screenShake = null; return; }
+  const remaining = (s.until - now) / s.durMs;
+  const mag = s.magnitude * remaining;
+  camera.position.x += (Math.random()*2 - 1) * mag;
+  camera.position.y += (Math.random()*2 - 1) * mag;
+  camera.position.z += (Math.random()*2 - 1) * mag;
+}
+
 function loop(){
   requestAnimationFrame(loop);
-  tickAnimation(performance.now());
-  renderer.render(scene,camera);
+  const now = performance.now();
+  tickAnimation(now);
+  bobEnemiesInPlace(now);
+  // Attack-swing yaw and shake ride on top of whatever base pose the
+  // camera is currently in (set by tickAnimation or setCameraToCellAndDir).
+  applyAttackSwingYawOffset(now);
+  applyScreenShake(now);
+  renderer.render(scene, camera);
 }
 loop();
 </script>
