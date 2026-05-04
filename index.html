@@ -114,6 +114,15 @@
   #roomPanel > #roomDesc,
   #roomPanel > #itemList,
   #roomPanel > #log { position:relative; z-index:1; opacity:0.78; }
+  /* Player arrow lives above the map but below the room text. */
+  #playerArrowMarker {
+    position:absolute; left:50%; top:50%;
+    transform: translate(-50%, -50%) rotate(0deg);
+    transition: transform 250ms ease-out;
+    color:#bff5b0; font-family:'Courier New',monospace; font-size:22px;
+    font-weight:bold; pointer-events:none; z-index:1;
+    text-shadow: 0 0 4px rgba(120,255,120,0.6);
+  }
   /* Buttons inside ROOM panel (item Take buttons) stay fully opaque so
      they remain readable/tappable. */
   #roomPanel > #itemList button { opacity:1; }
@@ -201,6 +210,9 @@
     <div id="itemList"></div>
     <div id="log"></div>
     <div id="discoveredMap" style="margin-top:6px;"></div>
+    <!-- Player arrow: centered overlay, rotates smoothly with facing,
+         stays put while the discoveredMap pans under it. -->
+    <div id="playerArrowMarker">^</div>
   </div>
   <div class="panel" id="combatPanel">
     <div id="statusGrid"></div>
@@ -400,12 +412,11 @@ let dungeonGroup;
 function initThree(){
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  // No distance fog: THREE.Fog measures from the camera, which is offset
-  // ~0.4 cells back from the room center and moves around during rotation
-  // — that produced a "spherical" feel where visibility shifted with
-  // facing. Visibility is now strictly the 3x3 grid BFS computed from the
-  // player's cell center; the torch point light handles atmosphere.
-  scene.fog = null;
+  // Fuzzy edge of vision: linear distance fog tuned so the player's own
+  // room is fully clear, the next room edge softens, and the boundary of
+  // the 3x3 BFS-rendered area dissolves to black. Anchored to the
+  // camera, so it moves smoothly with the player on every frame.
+  scene.fog = new THREE.Fog(0x000000, CELL * 1.4, CELL * 2.6);
 
   // 3D viewport: 4:3 (400x300), top of the layout — same on every device.
   const VIEW_W = 400, VIEW_H = 300;
@@ -610,6 +621,10 @@ function drawRoom(c, gx, gy){
     eObj.userData.bobPhase = Math.random() * Math.PI * 2;
     eObj.userData.cellX = gx;
     eObj.userData.cellY = gy;
+    eObj.userData.enemyRef = c.enemy;
+    // The previous mesh (if any) was destroyed when dungeonGroup cleared,
+    // so any lingering phrase sprite reference on the data is now stale.
+    c.enemy.currentPhraseSprite = null;
     dungeonGroup.add(eObj);
   }
 }
@@ -775,11 +790,10 @@ function tryMoveForward(){
   state.anim = {
     kind:'move', startTs: performance.now(), durMs: ANIM_DURATION_MS,
     fromPos, toPos, fromYaw: yawForDir(p.dir), toYaw: yawForDir(p.dir),
+    fromCellX: p.x - DIR_VEC[p.dir][0], fromCellY: p.y - DIR_VEC[p.dir][1],
+    toCellX:   p.x,                     toCellY:   p.y,
     onDone: ()=>{ log(`You step forward into a new room.`); enterCell(); }
   };
-  // Render with new logical pos so the destination + destination-ahead room
-  // is in the scene as the camera flies through. anim is set, so this won't
-  // snap the camera.
   renderVisibleRooms();
 }
 
@@ -817,6 +831,8 @@ function tryMoveBackward(){
   state.anim = {
     kind:'move', startTs: performance.now(), durMs: ANIM_DURATION_MS,
     fromPos, toPos, fromYaw: yawForDir(p.dir), toYaw: yawForDir(p.dir),
+    fromCellX: p.x - DIR_VEC[back][0], fromCellY: p.y - DIR_VEC[back][1],
+    toCellX:   p.x,                    toCellY:   p.y,
     onDone: ()=>{
       log("You step backward.");
       const here2 = cellAt(p.x, p.y);
@@ -925,6 +941,8 @@ const SHIELD_STATS = {
 };
 
 function pickUpItem(idx){
+  // In combat, picking up something costs your action.
+  if(state.combat && state.combatBusy) return;
   const c = cellAt(state.player.x, state.player.y);
   const item = c.items.splice(idx,1)[0];
   if(item.startsWith('Gold')){
@@ -957,6 +975,11 @@ function pickUpItem(idx){
   }
   renderVisibleRooms();
   refreshUI();
+  // If in combat, picking the item up was your action → enemy retaliates.
+  if(state.combat){
+    state.combatBusy = true;
+    enemyTurn();
+  }
 }
 
 // -------- combat --------
@@ -1156,9 +1179,10 @@ function buildDiscoveredLevelAsciiMap(){
       g[cy+1][cx] = wallH(c.walls[S]);
       g[cy][cx-1] = wallV(c.walls[W]);
       g[cy][cx+1] = wallV(c.walls[E]);
-      if(x===p.x && y===p.y)      g[cy][cx] = arrow;
-      else if(c.stairs)            g[cy][cx] = 'X';
-      else                          g[cy][cx] = ' ';
+      // Player char is drawn as a separate centered overlay that rotates
+      // smoothly with facing direction; here we just mark stairs.
+      if(c.stairs)                 g[cy][cx] = 'X';
+      else                         g[cy][cx] = ' ';
     }
   }
   // Always return the full-level grid (no bounding-box trim) so callers
@@ -1204,10 +1228,42 @@ function updateRightHandSprite(){
   rh.hidden = false;
 }
 
+// Cumulative angle (in degrees) for the player arrow overlay so we
+// always rotate the SHORT way between cardinal directions. CSS
+// transition handles the smoothing visually.
+let playerArrowAngleDeg = 0;
+function updatePlayerArrowRotation(){
+  const m = document.getElementById('playerArrowMarker');
+  if(!m) return;
+  // Map direction index (N,E,S,W) -> cardinal degrees with 0 = arrow pointing up.
+  const targetByDir = [0, 90, 180, 270];
+  const target = targetByDir[state.player.dir];
+  // Shortest signed delta in degrees, mod 360.
+  let delta = ((target - playerArrowAngleDeg) % 360 + 540) % 360 - 180;
+  playerArrowAngleDeg = playerArrowAngleDeg + delta;
+  m.style.transform = `translate(-50%, -50%) rotate(${playerArrowAngleDeg}deg)`;
+}
+
+// Translate the discovered-map <pre> so that the cell at (visX, visY)
+// in continuous cell coords sits at the panel's visual center. Called
+// every render frame so the map pans smoothly during a move animation.
+function updateDiscoveredMapTranslate(visX, visY){
+  const pre = document.getElementById('discoveredMapPre');
+  if(!pre || !state.dungeon) return;
+  const playerMapCol = visX * 2 + 1;
+  const playerMapRow = visY * 2 + 1;
+  const mapGw = state.dungeon.W_ * 2 + 1;
+  const mapGh = state.dungeon.H_ * 2 + 1;
+  const dxCh = (mapGw / 2) - playerMapCol - 0.5;
+  const dyEm = (mapGh / 2) - playerMapRow - 0.5;
+  pre.style.transform = `translate(${dxCh}ch, ${dyEm}em)`;
+}
+
 function refreshUI(){
   const p = state.player;
   const c = cellAt(p.x,p.y);
   updateRightHandSprite();
+  updatePlayerArrowRotation();
   // Compass: rotate red needle to point in player's facing dir.
   // CSS rotation: needle base points up (= North). N=0deg, E=90, S=180, W=270.
   const dirDeg = [0,90,180,270][p.dir];
@@ -1219,19 +1275,14 @@ function refreshUI(){
   document.getElementById('compassText').innerHTML =
     `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}`;
   // The discovered map renders as a half-transparent backdrop behind the
-  // ROOM info text. The map is the full level; we translate the <pre> in
-  // ch/em units so the player's character (^>v<) sits at the panel's
-  // visual center while the map orientation stays north-up.
-  const playerMapCol = state.player.x * 2 + 1;
-  const playerMapRow = state.player.y * 2 + 1;
-  const mapGw = state.dungeon.W_ * 2 + 1;
-  const mapGh = state.dungeon.H_ * 2 + 1;
-  const dxCh = (mapGw / 2) - playerMapCol - 0.5;
-  const dyEm = (mapGh / 2) - playerMapRow - 0.5;
+  // ROOM info text. We render the full level once per refreshUI; the
+  // <pre>'s translate is updated every frame in updateDiscoveredMapTranslate
+  // so the player's character (^>v<) stays centered and the map pans
+  // smoothly during move animations.
   document.getElementById('discoveredMap').innerHTML =
-    `<pre style="margin:0;color:#cfc;font-size:18px;line-height:1.0;` +
-    `font-family:'Courier New',monospace;` +
-    `transform:translate(${dxCh}ch, ${dyEm}em);">${buildDiscoveredLevelAsciiMap()}</pre>`;
+    `<pre id="discoveredMapPre" style="margin:0;color:#cfc;font-size:18px;line-height:1.0;` +
+    `font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
+  updateDiscoveredMapTranslate(state.player.x, state.player.y);
 
   // room panel
   let desc = `You stand in a stone chamber.`;
@@ -1287,6 +1338,14 @@ function triggerPlayerDeath(){
   state.combat = null;
   state.combatBusy = false;
   state.pendingAction = null;
+  // Hide all enemy sprites so they don't appear to tilt with the camera
+  // during the death pitch-down (sprites always billboard to the camera,
+  // which produced the "enemy rotating with player" look).
+  if(dungeonGroup){
+    for(const obj of dungeonGroup.children){
+      if(obj.userData && obj.userData.isEnemy) obj.visible = false;
+    }
+  }
   // Render stats summary into the overlay.
   const s = state.stats;
   const stats = document.getElementById('deathStats');
@@ -1344,6 +1403,9 @@ function renderInventoryOverlay(){
 function useConsumableByName(name){
   const idx = state.player.inv.indexOf(name);
   if(idx < 0) return;
+  // While in combat, using an item costs your turn. Skip during a busy
+  // turn-in-flight so it doesn't double-trigger.
+  if(state.combat && state.combatBusy) return;
   // Refusal guard: don't consume if conditions don't allow it.
   const guard = CONSUMABLE_GUARDS[name];
   if(guard){
@@ -1361,6 +1423,11 @@ function useConsumableByName(name){
   }
   refreshUI();
   renderInventoryOverlay();
+  // If in combat, that consumed our action → enemy retaliates.
+  if(state.combat){
+    state.combatBusy = true;
+    enemyTurn();
+  }
 }
 function openInventoryOverlay(){
   renderInventoryOverlay();
@@ -1482,6 +1549,9 @@ if(window.visualViewport){
 initThree();
 newLevel(1);
 fitWrapToViewport();
+// Fire-and-forget: enemy chatter library loads on its own; phrases will
+// start appearing once the JSON arrives. No-op if it can't be fetched.
+loadAllEnemyPhraseLibraries();
 function tickAnimation(now){
   const a = state.anim;
   if(!a) return;
@@ -1569,6 +1639,103 @@ function startEnemyLungeAnimation(enemyObj, onPeak, onDone){
   };
 }
 
+// ---------- enemy chatter (random phrases) ----------
+const ENEMY_PHRASE_FILE = {
+  'Giant Rat': 'enemies/giant_rat.json',
+  'Goblin':    'enemies/goblin.json',
+  'Skeleton':  'enemies/skeleton.json',
+  'Slime':     'enemies/slime.json',
+};
+const enemyPhraseLibrariesByName = {}; // populated from JSON at startup
+async function loadAllEnemyPhraseLibraries(){
+  await Promise.all(Object.entries(ENEMY_PHRASE_FILE).map(async ([name, path])=>{
+    try{
+      const r = await fetch(path);
+      if(!r.ok) return;
+      const data = await r.json();
+      enemyPhraseLibrariesByName[name] = Array.isArray(data.phrases) ? data.phrases : [];
+    }catch(_){ /* offline / no server — skip */ }
+  }));
+}
+function shuffleInPlace(a){
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+function getNextPhraseForEnemy(enemy){
+  const lib = enemyPhraseLibrariesByName[enemy.name];
+  if(!lib || !lib.length) return null;
+  if(!enemy.phraseQueue || enemy.phraseQueue.length === 0){
+    enemy.phraseQueue = shuffleInPlace(lib.slice());
+  }
+  return enemy.phraseQueue.pop();
+}
+const PHRASE_SHOW_MIN_MS = 2000;
+const PHRASE_SHOW_MAX_MS = 4000;
+const PHRASE_FADE_MS     = 1000;
+const PHRASE_GAP_MIN_MS  = 2000;
+const PHRASE_GAP_MAX_MS  = 5000;
+
+function tickEnemyPhrases(now){
+  if(!dungeonGroup) return;
+  for(const obj of dungeonGroup.children){
+    const u = obj.userData;
+    if(!u || !u.isEnemy || u.dying) continue;
+    const enemy = u.enemyRef;
+    if(!enemy) continue;
+
+    if(typeof enemy.nextPhraseAt !== 'number'){
+      enemy.nextPhraseAt = now + PHRASE_GAP_MIN_MS + Math.random()*(PHRASE_GAP_MAX_MS-PHRASE_GAP_MIN_MS);
+      enemy.phraseQueue = enemy.phraseQueue || [];
+    }
+
+    // If our currentPhraseSprite is parented to a different/old object
+    // (after a renderVisibleRooms), drop the reference.
+    if(enemy.currentPhraseSprite && enemy.currentPhraseSprite.parent !== obj){
+      enemy.currentPhraseSprite = null;
+    }
+
+    if(enemy.currentPhraseSprite){
+      const sp = enemy.currentPhraseSprite;
+      if(now >= enemy.currentPhraseFadeStart){
+        const fadeT = Math.min(1, (now - enemy.currentPhraseFadeStart) / PHRASE_FADE_MS);
+        sp.material.opacity = 1 - fadeT;
+        if(fadeT >= 1){
+          obj.remove(sp);
+          if(sp.material){
+            if(sp.material.map) sp.material.map.dispose();
+            sp.material.dispose();
+          }
+          enemy.currentPhraseSprite = null;
+          enemy.nextPhraseAt = now + PHRASE_GAP_MIN_MS + Math.random()*(PHRASE_GAP_MAX_MS-PHRASE_GAP_MIN_MS);
+        }
+      } else {
+        sp.material.opacity = 1;
+      }
+      continue;
+    }
+
+    if(now >= enemy.nextPhraseAt){
+      const phrase = getNextPhraseForEnemy(enemy);
+      if(!phrase){
+        enemy.nextPhraseAt = now + 5000;
+        continue;
+      }
+      const sp = makeTextSprite(phrase);
+      sp.position.set(0, 1.25, 0); // local: above enemy head
+      sp.material.depthTest = false;
+      sp.material.opacity = 1;
+      sp.renderOrder = 1000;
+      obj.add(sp);
+      enemy.currentPhraseSprite = sp;
+      const showMs = PHRASE_SHOW_MIN_MS + Math.random()*(PHRASE_SHOW_MAX_MS-PHRASE_SHOW_MIN_MS);
+      enemy.currentPhraseFadeStart = now + showMs;
+    }
+  }
+}
+
 // Death animation for an enemy sprite: blink red/black several times,
 // then fade alpha to 0. Calls onDone after the fade completes so the
 // caller can finally clear the cell.enemy reference and re-render.
@@ -1578,6 +1745,14 @@ const ENEMY_DEATH_BLINK_CYCLES = 6; // total color toggles across blink window
 function playEnemyDeathAnimation(enemyObj, onDone){
   const mat = enemyObj && enemyObj.material;
   if(!mat || !mat.color){ if(onDone) onDone(); return; }
+  // If a lunge for THIS enemy was still in progress, snap it back to
+  // its base pose first — otherwise the death blink/fade can render
+  // at the lunge's mid-frame offset (the "enemy flashes closer to
+  // player on disappear" bug).
+  if(state.enemyLunge && state.enemyLunge.enemyObj === enemyObj){
+    enemyObj.position.copy(state.enemyLunge.basePos);
+    state.enemyLunge = null;
+  }
   enemyObj.userData.dying = true;
   const origColor = mat.color.getHex();
   mat.transparent = true;
@@ -1674,10 +1849,20 @@ function loop(){
   }
   bobEnemiesInPlace(now);
   tickEnemyLunge(now);
+  tickEnemyPhrases(now);
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
-  // Death tilt: camera pitches down to the floor over 1.4s. Layered after
-  // shake so it overrides any tail-end shake noise on the X rotation.
+  // Smooth ASCII map pan: interpolate continuous cell coords during a
+  // move animation so the gray map slides under the player char.
+  let visX = state.player.x, visY = state.player.y;
+  if(state.anim && state.anim.kind === 'move' &&
+     typeof state.anim.fromCellX === 'number'){
+    const t = Math.min(1, (now - state.anim.startTs) / state.anim.durMs);
+    const e = smoothstep(t);
+    visX = state.anim.fromCellX + (state.anim.toCellX - state.anim.fromCellX) * e;
+    visY = state.anim.fromCellY + (state.anim.toCellY - state.anim.fromCellY) * e;
+  }
+  updateDiscoveredMapTranslate(visX, visY);
   if(state.dead){
     const t = Math.min(1, (now - state.deathStartTs) / 1400);
     camera.rotation.x = -t * Math.PI * 0.5;
