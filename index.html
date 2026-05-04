@@ -720,12 +720,12 @@ function renderVisibleRooms(){
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
       // Render radius depends on whether the player has a lit torch.
-      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 1 (3x3) so geometry
-      // exists past the player's own walls for fog to fade across,
-      // producing a soft fuzzy black edge that pans with the camera.
-      // Side-cell content (enemies/items) sits past fog.far and stays
-      // fully black, so rotating in the dark still doesn't reveal it.
-      const radius = (state.player.torchCharges > 0) ? 2 : 1;
+      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 0 (just the player's
+      // own cell) so neighbor cells aren't rendered at all and rotating
+      // in the dark cannot reveal anything in side rooms. The lit-mode
+      // camera-anchored fog pattern, scaled to that 1x1 bubble, fades
+      // own walls into black smoothly via the same fog gradient.
+      const radius = (state.player.torchCharges > 0) ? 2 : 0;
       if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
@@ -2189,29 +2189,25 @@ function applyTorchLightingEffects(){
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: ditch the camera-anchored point-light + fog approach.
-    // Instead, plant the point light at the player's ROOM CENTER with a
-    // tight range (~55% of room width radius). Walls and doors of the
-    // own cell fall inside this ring of light; corners and adjacent
-    // rooms fall outside. This means rotation does not change what is
-    // illuminated — eliminating the wall-shadow flicker / next-room
-    // peeks the camera-relative fog suffered from.
-    const cx = state.player.x * CELL + CELL/2;
-    const cz = state.player.y * CELL + CELL/2;
-    if(torch){
-      torch.intensity = 1.6;
-      torch.distance  = CELL * 0.9;        // ring radius -> walls in, corners out
-      torch.position.set(cx, WALL_H * 0.55, cz);
+    // Torch out: SAME mechanism as lit mode (camera-anchored point
+    // light + camera-anchored fog), just scaled down to a 1x1 bubble.
+    // The loop's setCameraToCellAndDir/tickAnimation already keeps the
+    // point light riding the camera, so we only adjust intensity/range
+    // and fog distances; we do NOT override torch.position. Fog shape
+    // mirrors the lit mode (near≈room-center distance, far just past
+    // own walls). BFS radius is 0 so neighbor cells aren't rendered.
+    if(torch){ torch.intensity = 0.5; torch.distance = CELL * 1.0; }
+    if(scene && scene.fog){
+      scene.fog.near = centerBias;             // ~1.6 (room-center distance)
+      scene.fog.far  = CELL * 0.7 + centerBias; // ~4.4 (just past own walls)
     }
-    // Drop ambient to 0 so unlit geometry reads as fully black.
-    const amb = scene && scene.getObjectByName('ambient');
-    if(amb) amb.intensity = 0;
-    // Push fog so far it doesn't darken the lit ring further.
-    if(scene && scene.fog){ scene.fog.near = 100; scene.fog.far = 200; }
+    // Make sure ambient is restored if it was zeroed by a previous mode.
+    const amb0 = scene && scene.getObjectByName('ambient');
+    if(amb0) amb0.intensity = 0.5;
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
   }
-  // Torch lit — restore ambient and let the camera-anchored torch own the room.
+  // Torch lit — ensure ambient is back to its standard level.
   const amb = scene && scene.getObjectByName('ambient');
   if(amb) amb.intensity = 0.5;
   // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
