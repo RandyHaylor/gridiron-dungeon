@@ -38,14 +38,16 @@
   .hand.left  { left:0;    transform: rotate(-15deg); }
   .hand.right { right:0;   transform: rotate(20deg); }
   .hand[hidden]{ display:none; }
-  /* Attack swing: weapon raises up then back down. Includes the static
-     rotate(20deg) on every keyframe so the rotation isn't lost. */
+  /* Attack swing: weapon rises higher, earlier, stays up longer, lowers
+     later. Total duration intentionally longer than the camera yaw bob
+     so the held weapon is still up when the swing visual ends. */
   @keyframes attackSwingKf {
     0%   { transform: rotate(20deg) translateY(0); }
-    50%  { transform: rotate(20deg) translateY(-44px); }
-    100% { transform: rotate(20deg) translateY(0); }
+    18%  { transform: rotate(20deg) translateY(-90px); }   /* fast rise */
+    78%  { transform: rotate(20deg) translateY(-90px); }   /* long hold */
+    100% { transform: rotate(20deg) translateY(0); }       /* late drop */
   }
-  .hand.right.attackSwing { animation: attackSwingKf 280ms ease-in-out; }
+  .hand.right.attackSwing { animation: attackSwingKf 420ms ease-in-out; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -307,7 +309,7 @@ const state = {
   screenShake:  null, // {startTs, until, durMs, magnitude}
 };
 const ANIM_DURATION_MS = 250;
-const ATTACK_SWING_DURATION_MS = 280;
+const ATTACK_SWING_DURATION_MS = 180; // camera yaw bob — fast
 const SCREEN_SHAKE_DURATION_MS = 220;
 const SCREEN_SHAKE_MAGNITUDE = 0.18;
 const ENEMY_BOB_AMPLITUDE = 0.06;
@@ -1282,8 +1284,9 @@ function applyAttackSwingYawOffset(now){
   if(!a) return;
   const t = (now - a.startTs) / a.durMs;
   if(t >= 1){ state.attackSwing = null; return; }
-  // -sin(2*pi*t)*15deg → 0,-15,0,+15,0 over t=[0,1] — quick CCW then CW.
-  const offsetRad = -Math.sin(2 * Math.PI * t) * (15 * Math.PI / 180);
+  // +sin(2*pi*t)*15deg → 0,+15,0,-15,0 over t=[0,1] — quick CW then CCW
+  // (opposite of the previous -sin direction).
+  const offsetRad = Math.sin(2 * Math.PI * t) * (15 * Math.PI / 180);
   camera.rotation.y += offsetRad;
 }
 
