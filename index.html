@@ -1189,7 +1189,7 @@ window.addEventListener('keydown', (e)=>{
   }
   else if(e.key==='f'||e.key==='F'){
     if(state.combat) combatAttack();
-    else log("Nothing to fight.");
+    else triggerAttackSwingAnimation(); // free swing for fun/testing
   }
   else if(e.key==='r'||e.key==='R'){
     if(state.combat) combatRun();
