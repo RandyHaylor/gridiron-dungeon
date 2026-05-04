@@ -2200,14 +2200,21 @@ function applyTorchLightingEffects(){
     // the 0.4-cell back offset, but the light doesn't, so when the
     // player rotates, the same pixels stay equally lit (no left/right
     // wall dimming or shadow flicker).
-    const cellCenterX = state.player.x * CELL + CELL/2;
-    const cellCenterZ = state.player.y * CELL + CELL/2;
-    // Light at cell center; range covers own walls (2 from center, plus
-    // some bleed) but does NOT reach neighbor cells (4+ from center).
+    // Anchor the light at PLAYER_BACK_OFFSET in front of the camera:
+    // the camera always points toward room center, so this puts the
+    // light at the room center while the camera tweens through a move
+    // or arcs around it during a rotation. Net effect: light tracks
+    // smoothly at exactly the same rate as the camera, no jumps.
     if(torch){
+      const fwdX = -Math.sin(camera.rotation.y);
+      const fwdZ = -Math.cos(camera.rotation.y);
       torch.intensity = 1.2;
-      torch.distance  = CELL * 0.55; // ~2.2 — barely covers own walls
-      torch.position.set(cellCenterX, WALL_H * 0.55, cellCenterZ);
+      torch.distance  = CELL * 0.55;
+      torch.position.set(
+        camera.position.x + fwdX * PLAYER_BACK_OFFSET,
+        WALL_H * 0.55,
+        camera.position.z + fwdZ * PLAYER_BACK_OFFSET
+      );
     }
     // fog.near still past the cell's far wall (so all own-room walls
     // live in the no-fog zone and rotation does not dim them); fog.far
