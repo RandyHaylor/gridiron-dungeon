@@ -1391,6 +1391,17 @@ function triggerPlayerDeath(){
       if(obj.userData && obj.userData.isEnemy) obj.visible = false;
     }
   }
+  if(scene){
+    const phraseSprites = scene.children.filter(o => o.userData && o.userData.isEnemyPhrase);
+    for(const sp of phraseSprites){
+      scene.remove(sp);
+      if(sp.material){
+        if(sp.material.map) sp.material.map.dispose();
+        sp.material.dispose();
+      }
+      if(sp.userData.ownerEnemy) sp.userData.ownerEnemy.currentPhraseSprite = null;
+    }
+  }
   // Render stats summary into the overlay.
   const s = state.stats;
   const stats = document.getElementById('deathStats');
@@ -1780,6 +1791,31 @@ const PHRASE_FADE_MS     = 1000;
 const PHRASE_GAP_MIN_MS  = 2000;
 const PHRASE_GAP_MAX_MS  = 5000;
 
+// Defensive sweep: scene-level phrase bubbles whose owner enemy is dead
+// (hp<=0) or no longer placed in any cell get removed and disposed. Runs
+// once per frame so any orphan sprite gets cleaned up reliably.
+function reapOrphanedPhraseSprites(){
+  if(!scene) return;
+  const toRemove = [];
+  for(const obj of scene.children){
+    const u = obj.userData;
+    if(!u || !u.isEnemyPhrase) continue;
+    const owner = u.ownerEnemy;
+    const ownerAlive = owner && owner.hp > 0 && owner.currentPhraseSprite === obj;
+    if(!ownerAlive) toRemove.push(obj);
+  }
+  for(const sp of toRemove){
+    scene.remove(sp);
+    if(sp.material){
+      if(sp.material.map) sp.material.map.dispose();
+      sp.material.dispose();
+    }
+    if(sp.userData.ownerEnemy && sp.userData.ownerEnemy.currentPhraseSprite === sp){
+      sp.userData.ownerEnemy.currentPhraseSprite = null;
+    }
+  }
+}
+
 function tickEnemyPhrases(now){
   if(!dungeonGroup || !scene) return;
   for(const obj of dungeonGroup.children){
@@ -1827,6 +1863,8 @@ function tickEnemyPhrases(now){
       // depthTest stays true so walls / doors occlude the bubble like a
       // real object in the world.
       sp.material.opacity = 1;
+      sp.userData.isEnemyPhrase = true;
+      sp.userData.ownerEnemy   = enemy;
       scene.add(sp);
       enemy.currentPhraseSprite = sp;
       const showMs = PHRASE_SHOW_MIN_MS + Math.random()*(PHRASE_SHOW_MAX_MS-PHRASE_SHOW_MIN_MS);
@@ -1994,6 +2032,7 @@ function loop(){
   bobEnemiesInPlace(now);
   tickEnemyLunge(now);
   tickEnemyPhrases(now);
+  reapOrphanedPhraseSprites();
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
   // Smooth ASCII map pan: interpolate continuous cell coords during a
