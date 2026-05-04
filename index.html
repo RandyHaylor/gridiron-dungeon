@@ -10,10 +10,11 @@
               overscroll-behavior:none; touch-action:manipulation;
               display:flex; justify-content:center; align-items:flex-start;
               height:100%; width:100%; }
-  /* Fixed portrait viewport: 400 logical x 800 logical. The wrap is the
-     authoritative size; we scale the whole thing with CSS transform on
-     resize so it always fits the device viewport without changing layout. */
-  #wrap { width:400px; height:800px; position:relative; background:#000;
+  /* Fixed portrait viewport: 400 logical x 700 logical. Aspect chosen so
+     the width-fit and height-fit scales are roughly equal on iPhone-sized
+     viewports — width fills, height has just enough headroom for the
+     dynamic browser bottom bar. */
+  #wrap { width:400px; height:700px; position:relative; background:#000;
           border:1px solid #0a0; box-sizing:border-box;
           transform-origin: top left; }
   /* 3D area is now 16:10 across the top (~31% of the wrap), giving
@@ -21,7 +22,7 @@
   #game { position:absolute; left:0; top:0; width:400px; height:250px; overflow:hidden; }
   #game canvas { display:block; width:400px; height:250px; }
   #ui {
-    position:absolute; left:0; top:250px; width:400px; height:550px;
+    position:absolute; left:0; top:250px; width:400px; height:450px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
     padding:6px; box-sizing:border-box; font-size:14px; line-height:1.25;
     display:grid; grid-template-rows: auto 1fr auto; gap:6px;
@@ -921,7 +922,7 @@ function fitWrapToViewport(){
   const vv = window.visualViewport;
   const vw = vv ? vv.width  : window.innerWidth;
   const vh = vv ? vv.height : window.innerHeight;
-  const scale = Math.min(vw/400, vh/800);
+  const scale = Math.min(vw/400, vh/700);
   el.style.transform = `scale(${scale})`;
   // Lock body to the visible area so iOS doesn't expose dead space below.
   document.body.style.height = vh + 'px';
