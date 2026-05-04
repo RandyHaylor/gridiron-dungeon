@@ -6,23 +6,33 @@
 <title>Atari-style Dungeon Crawler MVP</title>
 <style>
   html,body { margin:0; padding:0; background:#111; color:#0f0;
-              font-family: "VT323","Courier New",monospace; overflow:auto;
-              display:flex; justify-content:center; align-items:flex-start; }
+              font-family: "VT323","Courier New",monospace; overflow:hidden;
+              overscroll-behavior:none; touch-action:manipulation;
+              display:flex; justify-content:center; align-items:flex-start;
+              height:100%; width:100%; }
   /* Fixed portrait viewport: 400 logical x 800 logical. The wrap is the
      authoritative size; we scale the whole thing with CSS transform on
      resize so it always fits the device viewport without changing layout. */
   #wrap { width:400px; height:800px; position:relative; background:#000;
           border:1px solid #0a0; box-sizing:border-box;
           transform-origin: top left; }
-  #game { position:absolute; left:0; top:0; width:400px; height:400px; overflow:hidden; }
-  #game canvas { display:block; width:400px; height:400px; }
+  /* 3D area is now 16:10 across the top (~31% of the wrap), giving
+     the UI more than half the screen, per request. */
+  #game { position:absolute; left:0; top:0; width:400px; height:250px; overflow:hidden; }
+  #game canvas { display:block; width:400px; height:250px; }
   #ui {
-    position:absolute; left:0; top:400px; width:400px; height:400px;
+    position:absolute; left:0; top:250px; width:400px; height:550px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
     padding:6px; box-sizing:border-box; font-size:14px; line-height:1.25;
-    display:grid; grid-template-rows: auto auto 1fr; gap:6px;
+    display:grid; grid-template-rows: auto 1fr auto; gap:6px;
   }
-  #ui .panel { border:1px solid #0a0; padding:4px 6px; }
+  #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; }
+  #ui h3 { margin:0 0 3px 0; font-size:13px; color:#9f9; letter-spacing:1px; }
+
+  /* Compact 2x3 symbol d-pad for movement / interaction. */
+  .dpad { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; }
+  .dpad button { font-size:22px; padding:8px 0; line-height:1;
+                 min-height:38px; }
   #ui h3 { margin:0 0 4px 0; font-size:16px; color:#9f9; letter-spacing:1px; }
   #log { position:absolute; top:8px; left:8px; right:8px; max-height:140px; overflow:hidden;
          background:rgba(0,0,0,0.55); padding:6px 10px; font-size:16px; pointer-events:none; }
@@ -77,13 +87,14 @@
 </div>
 <div id="ui">
   <div class="panel" id="movePanel">
-    <h3>MOVE</h3>
-    <button id="btnFwd">Forward (W)</button>
-    <button id="btnBack">Backward (S)</button>
-    <button id="btnLeft">Turn Left (A)</button>
-    <button id="btnRight">Turn Right (D)</button>
-    <button id="btnDoor">Open/Close Door (E)</button>
-    <button id="btnStairs">Descend (Space)</button>
+    <div class="dpad">
+      <button id="btnLeft"   title="Turn left (A)">↺</button>
+      <button id="btnFwd"    title="Forward (W)">↑</button>
+      <button id="btnRight"  title="Turn right (D)">↻</button>
+      <button id="btnDoor"   title="Open/close door (E)">▢</button>
+      <button id="btnBack"   title="Backward (S)">↓</button>
+      <button id="btnStairs" title="Descend stairs (Space)">▼</button>
+    </div>
   </div>
   <div class="panel" id="roomPanel">
     <h3>ROOM</h3>
@@ -239,8 +250,8 @@ function initThree(){
   scene.background = new THREE.Color(0x000000);
   scene.fog = new THREE.Fog(0x000000, CELL*0.8, CELL*2.2);
 
-  // Fixed 400x400 portrait viewport — same on every device, never resizes.
-  const VIEW_W = 400, VIEW_H = 400;
+  // 3D viewport is 16:10 in the top of the layout — same on every device.
+  const VIEW_W = 400, VIEW_H = 250;
   camera = new THREE.PerspectiveCamera(75, VIEW_W/VIEW_H, 0.05, 50);
   renderer = new THREE.WebGLRenderer({ antialias:false });
   renderer.setPixelRatio(1);
@@ -900,20 +911,28 @@ window.addEventListener('keydown', (e)=>{
   }
 });
 
-// Scale the fixed 400x800 wrap to fill the viewport while keeping aspect.
-// Same layout on all platforms — we only zoom the whole thing.
+// Scale the fixed 400x800 wrap to fit the *visible* viewport (the
+// visualViewport API gives us the real area on iOS Safari/Chrome where the
+// dynamic bottom bar otherwise eats into innerHeight). Same layout on all
+// platforms — we only zoom the whole thing.
 function fitWrapToViewport(){
   const el = document.getElementById('wrap');
   if(!el) return;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vv = window.visualViewport;
+  const vw = vv ? vv.width  : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
   const scale = Math.min(vw/400, vh/800);
   el.style.transform = `scale(${scale})`;
-  // Center horizontally inside the viewport.
-  document.body.style.minHeight = (800*scale) + 'px';
-  document.body.style.justifyContent = 'center';
+  // Lock body to the visible area so iOS doesn't expose dead space below.
+  document.body.style.height = vh + 'px';
+  document.body.style.width  = vw + 'px';
 }
 window.addEventListener('resize', fitWrapToViewport);
 window.addEventListener('orientationchange', fitWrapToViewport);
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', fitWrapToViewport);
+  window.visualViewport.addEventListener('scroll', fitWrapToViewport);
+}
 
 // -------- main --------
 initThree();
