@@ -2227,10 +2227,13 @@ function applyTorchLightingEffects(){
   if(torch && state.dungeon){
     const cx = state.player.x * CELL + CELL/2;
     const cz = state.player.y * CELL + CELL/2;
+    // Stronger falloff: finite range so brightness fades to 0 by the
+    // time it reaches the next room beyond. Combined with decay=2,
+    // current room is comfortably lit, neighbors dim, beyond goes dark.
     torch.decay = 2;
     torch.position.set(cx, WALL_H * 0.55, cz);
-    torch.intensity = 600;
-    torch.distance  = 0; // infinite range, only decay drives falloff
+    torch.intensity = 25;
+    torch.distance  = CELL * 2.5; // 10 — fades out before 2 cells away
   }
   const flameMarker = scene && scene.getObjectByName('torchFlameMarker');
   if(flameMarker && torch){
