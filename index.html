@@ -39,12 +39,15 @@
                  transition: opacity 600ms ease-out; }
   .hand.right { right:0;   transform: rotate(20deg); }
   .hand[hidden]{ display:none; }
-  /* Top HUD strip over the 3D view: dungeon level (left) + HP (right). */
+  /* Top HUD strip over the 3D view: dungeon level on the left,
+     HP centered (so it never overlaps the compass on the right). */
   #topHud { position:absolute; top:6px; left:46px; right:46px;
-             display:flex; justify-content:space-between; pointer-events:none;
+             display:flex; align-items:center; pointer-events:none;
              color:#fff; font-family:"VT323","Courier New",monospace;
              font-size:18px; letter-spacing:1px; z-index:7;
              text-shadow: 0 0 4px #000, 0 0 4px #000; }
+  #topHudLvl { flex:0 0 auto; }
+  #topHudHp  { flex:1; text-align:center; }
   #topHudHp.low { color:#ff3030; }
   /* Damage flash: full red veil over the 3D viewport, fades out fast. */
   #hitFlash { position:absolute; inset:0; background:rgba(220,30,30,0.55);
@@ -260,7 +263,7 @@
 <div id="settingsOverlay" hidden>
   <div id="settingsHeader">SETTINGS <span style="font-size:11px;opacity:.7;">(Close to dismiss)</span></div>
   <div class="settings-row">Music
-    <input type="range" id="settingsMusicVolSlider" min="0" max="1" step="0.01" value="0.25" />
+    <input type="range" id="settingsMusicVolSlider" min="0" max="1" step="0.01" value="0.125" />
   </div>
   <div class="settings-row">SFX
     <input type="range" id="settingsSfxVolSlider"   min="0" max="1" step="0.01" value="0.35" />
@@ -1541,7 +1544,7 @@ function refreshUI(){
   // Top HUD strip over the 3D view.
   const lvlEl = document.getElementById('topHudLvl');
   const hpEl  = document.getElementById('topHudHp');
-  if(lvlEl) lvlEl.textContent = `Lv ${state.level}`;
+  if(lvlEl) lvlEl.textContent = `Dungeon LVL: ${state.level}`;
   if(hpEl){
     hpEl.textContent = `HP ${p.hp}/${p.hpMax}`;
     hpEl.classList.toggle('low', p.hp < 6);
@@ -1633,11 +1636,10 @@ function triggerPlayerDeath(){
   // Hide all enemy sprites so they don't appear to tilt with the camera
   // during the death pitch-down (sprites always billboard to the camera,
   // which produced the "enemy rotating with player" look).
-  if(dungeonGroup){
-    for(const obj of dungeonGroup.children){
-      if(obj.userData && obj.userData.isEnemy) obj.visible = false;
-    }
-  }
+  // Note: enemy sprites are NOT hidden on death and the camera is NOT
+  // tilted. The world stays oriented as it was; the death overlay fades
+  // black on top. Enemy phrase bubbles are still cleared so we don't
+  // see chatter under the fade.
   if(scene){
     const phraseSprites = scene.children.filter(o => o.userData && o.userData.isEnemyPhrase);
     for(const sp of phraseSprites){
@@ -1949,7 +1951,7 @@ const SFX_BANK = {
   herb_collect:   sfxList('herb_collect',   'herb_collect',   4),
   herb_take:      sfxList('herb_take',      'herb_take',      4),
 };
-let audioMusicVolume = 0.25; // half of previous 0.5
+let audioMusicVolume = 0.125; // halved again from 0.25
 let audioSfxVolume   = 0.35; // half of previous 0.7
 let audioMusicEl     = null;
 let audioStarted     = false;
@@ -2545,10 +2547,8 @@ function loop(){
     visY = state.anim.fromCellY + (state.anim.toCellY - state.anim.fromCellY) * e;
   }
   updateDiscoveredMapTranslate(visX, visY);
-  if(state.dead){
-    const t = Math.min(1, (now - state.deathStartTs) / 1400);
-    camera.rotation.x = -t * Math.PI * 0.5;
-  }
+  // (No camera tilt on death — keeps enemy sprites and phrase bubbles
+  // oriented with the level. The death overlay handles the visual end.)
   renderer.render(scene, camera);
 }
 loop();
