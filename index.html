@@ -73,6 +73,26 @@
                        padding:10px; box-sizing:border-box; z-index:50;
                        display:flex; flex-direction:column; gap:6px; }
   #inventoryOverlay[hidden] { display:none !important; }
+  /* Death overlay: covers the whole wrap (game + UI), fades to black,
+     then message / stats / button fade in via cascading transitions. */
+  #deathOverlay { position:absolute; inset:0; background:#000; z-index:80;
+                  opacity:0; transition: opacity 1.4s ease-in;
+                  display:flex; flex-direction:column; align-items:center;
+                  justify-content:center; padding:20px; box-sizing:border-box;
+                  color:#bca; gap:14px; pointer-events:none;
+                  font-family: "VT323","Courier New",monospace; }
+  #deathOverlay.active { opacity:0.97; pointer-events:auto; }
+  #deathOverlay[hidden] { display:none !important; }
+  #deathMsg { font-size:24px; color:#c66; text-align:center; opacity:0;
+              transition: opacity 1.0s ease 1.4s; letter-spacing:1px; }
+  #deathStats { font-size:16px; opacity:0;
+                transition: opacity 1.0s ease 2.4s;
+                text-align:left; min-width:240px; line-height:1.35; }
+  #btnPlayAgain { font-size:18px; padding:8px 16px; opacity:0;
+                  transition: opacity 1.0s ease 3.0s; }
+  #deathOverlay.active #deathMsg,
+  #deathOverlay.active #deathStats,
+  #deathOverlay.active #btnPlayAgain { opacity:1; }
   #invHeader { color:#9f9; letter-spacing:1px; border-bottom:1px solid #0a0; padding-bottom:4px; }
   #invItemList { flex:1; overflow:auto; }
   #invItemList .invRow { display:flex; align-items:center; gap:8px; padding:3px 0;
@@ -103,6 +123,8 @@
   .dpad { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; }
   .dpad button { font-size:22px; padding:8px 0; line-height:1;
                  min-height:38px; }
+  /* Door button uses a text label rather than a symbol — make it fit. */
+  #btnDoor { font-size:13px; }
   /* Descend button glow + pulse when the player is standing on stairs. */
   .dpad button.available {
     background:#063;
@@ -185,6 +207,11 @@
     <div id="combatActions"></div>
     <button id="btnInventory" style="margin-top:4px;">Inventory (I)</button>
   </div>
+  <div id="deathOverlay" hidden>
+    <div id="deathMsg">one more skeleton for my army...</div>
+    <div id="deathStats"></div>
+    <button id="btnPlayAgain">Play Again (Space)</button>
+  </div>
   <div id="inventoryOverlay" hidden>
     <div id="invHeader">INVENTORY <span style="font-size:11px;opacity:.7;">(I or Close to dismiss)</span></div>
     <div id="invItemList"></div>
@@ -195,7 +222,7 @@
       <button id="btnLeft"   title="Turn left (A)">↺</button>
       <button id="btnFwd"    title="Forward (W)">↑</button>
       <button id="btnRight"  title="Turn right (D)">↻</button>
-      <button id="btnDoor"   title="Open/close door (E)">▢</button>
+      <button id="btnDoor"   title="Open/close door (E)">Open Door (E)</button>
       <button id="btnBack"   title="Backward (S)">↓</button>
       <button id="btnStairs" title="Descend stairs (Space)">▼</button>
     </div>
@@ -329,6 +356,17 @@ const state = {
   attackSwing:  null, // {startTs, durMs}
   screenShake:  null, // {startTs, until, durMs, magnitude}
   enemyLunge:   null, // {startTs, durMs, enemyObj, basePos:Vec3, peakPos:Vec3, peakFired, onPeak, onDone}
+  combatBusy:   false,// true while a player attack + enemy turn chain is in flight
+  dead:         false,
+  deathStartTs: 0,
+  stats: {
+    goldCollected: 0,
+    enemiesKilled: 0,
+    damageDealt:   0,
+    damageTaken:   0,
+    herbsEaten:    0,
+    visitedKeys:   new Set(), // unique "<level>:<x>:<y>" cells entered
+  },
 };
 const PLAYER_SWING_TOTAL_MS = 280;   // matches CSS attackSwingKf duration
 const ENEMY_HIT_FLASH_MS = 130;
@@ -348,6 +386,8 @@ function newLevel(level){
   state.player.y = d.py;
   state.player.dir = N;
   state.combat = null;
+  state.combatBusy = false;
+  if(state.stats) state.stats.visitedKeys.add(`${level}:${d.px}:${d.py}`);
   buildScene();
   log(`-- Level ${level} --`);
   refreshUI();
@@ -745,6 +785,7 @@ function tryMoveForward(){
 
 function enterCell(){
   const c = cellAt(state.player.x, state.player.y);
+  state.stats.visitedKeys.add(`${state.level}:${state.player.x}:${state.player.y}`);
   if(c.enemy){
     state.combat = { enemy: c.enemy, cellRef: c };
     log(`A ${c.enemy.name} blocks the way! (HP ${c.enemy.hp}/${c.enemy.hpMax})`);
@@ -864,6 +905,7 @@ const CONSUMABLES = {
   'Healing Herb': (p)=>{
     const before = p.hp;
     p.hp = Math.min(p.hpMax, p.hp + 8);
+    state.stats.herbsEaten += 1;
     return `You eat a Healing Herb. HP +${p.hp - before} (now ${p.hp}/${p.hpMax}).`;
   }
 };
@@ -881,6 +923,7 @@ function pickUpItem(idx){
     const m = item.match(/(\d+)/);
     const g = m? parseInt(m[1]):0;
     state.player.gold += g;
+    state.stats.goldCollected += g;
     log(`You pocket ${g}gp.`);
   } else if(WEAPON_STATS.hasOwnProperty(item)){
     const old = state.player.weapon;
@@ -925,7 +968,10 @@ function triggerAttackSwingAnimation(){
 }
 
 function combatAttack(){
+  if(state.dead) return;
+  if(state.combatBusy) return;        // ignore while previous attack-turn is in flight
   if(!state.combat) return;
+  state.combatBusy = true;
   const e = state.combat.enemy;
   triggerAttackSwingAnimation();
   // Pre-roll the player swing now (so the damage text in the eventual
@@ -948,11 +994,14 @@ function combatAttack(){
     if(!state.combat || state.combat.enemy !== e) return;
     if(playerHit){
       e.hp -= playerDmg;
+      state.stats.damageDealt += playerDmg;
       log(`You strike the ${e.name} for ${playerDmg}.`);
       if(e.hp <= 0){
+        state.stats.enemiesKilled += 1;
         log(`The ${e.name} crumples to the floor!`);
         state.combat.cellRef.enemy = null;
         state.combat = null;
+        state.combatBusy = false;
         renderVisibleRooms();
         refreshUI();
         return;
@@ -1006,6 +1055,7 @@ function enemyTurn(){
     }
     state.player.hp -= dmg;
     if(dmg > 0){
+      state.stats.damageTaken += dmg;
       const now = performance.now();
       state.screenShake = {
         startTs: now, until: now + SCREEN_SHAKE_DURATION_MS,
@@ -1024,8 +1074,8 @@ function enemyTurn(){
       log(`The ${e.name} hits you for ${dmg}.`);
     }
     if(state.player.hp <= 0){
-      log("You die in the dark. GAME OVER. (refresh to retry)");
-      state.combat = null;
+      log("You die in the dark.");
+      triggerPlayerDeath();
     }
     refreshUI();
   };
@@ -1034,10 +1084,12 @@ function enemyTurn(){
   // we can't (rare — geometry not visible), fall through to immediate.
   const cellRef = state.combat.cellRef;
   const enemyObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
+  const onLungeDone = ()=>{ state.combatBusy = false; };
   if(enemyObj){
-    startEnemyLungeAnimation(enemyObj, applyAtPeak, null);
+    startEnemyLungeAnimation(enemyObj, applyAtPeak, onLungeDone);
   } else {
     applyAtPeak();
+    onLungeDone();
   }
 }
 
@@ -1206,6 +1258,42 @@ function refreshUI(){
   stairsBtn.classList.toggle('available', !!c.stairs && !state.combat);
 }
 
+// -------- death sequence --------
+function triggerPlayerDeath(){
+  if(state.dead) return;
+  state.dead = true;
+  state.deathStartTs = performance.now();
+  state.combat = null;
+  state.combatBusy = false;
+  state.pendingAction = null;
+  // Render stats summary into the overlay.
+  const s = state.stats;
+  const stats = document.getElementById('deathStats');
+  stats.innerHTML =
+    `<div>Gold collected: ${s.goldCollected}</div>` +
+    `<div>Enemies killed: ${s.enemiesKilled}</div>` +
+    `<div>Damage dealt:   ${s.damageDealt}</div>` +
+    `<div>Damage taken:   ${s.damageTaken}</div>` +
+    `<div>Herbs eaten:    ${s.herbsEaten}</div>` +
+    `<div>Rooms explored: ${s.visitedKeys.size}</div>` +
+    `<div>Final dungeon level: ${state.level}</div>`;
+  const ov = document.getElementById('deathOverlay');
+  ov.hidden = false;
+  void ov.offsetWidth;
+  ov.classList.add('active');
+  // Pin the red flash so the last-damage tint persists into the fade-to-black.
+  const hf = document.getElementById('hitFlash');
+  if(hf){
+    hf.classList.remove('active');
+    hf.style.animation = 'none';
+    hf.style.opacity = '0.55';
+  }
+}
+function restartGameAfterDeath(){
+  // Simplest reset path: full reload preserves no in-memory state.
+  location.reload();
+}
+
 // -------- inventory overlay --------
 function renderInventoryOverlay(){
   const list = document.getElementById('invItemList');
@@ -1266,6 +1354,7 @@ document.getElementById('btnDoor').onclick  = toggleDoor;
 document.getElementById('btnStairs').onclick= descendStairs;
 document.getElementById('btnInventory').onclick = toggleInventoryOverlay;
 document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
+document.getElementById('btnPlayAgain').onclick = restartGameAfterDeath;
 
 // Movement keys auto-repeat at our own rate so the player isn't blocked
 // by the OS's initial keydown-repeat delay. Other keys fire once per
@@ -1273,11 +1362,17 @@ document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
 const KEY_REPEAT_INTERVAL_MS = 260; // a hair longer than ANIM_DURATION_MS
 const REPEAT_KEYS = new Set([
   'w','W','a','A','s','S','d','D',
-  'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'
+  'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+  'f','F'   // hold-to-attack
 ]);
 const heldRepeatingKeys = new Set();
 
 function dispatchKeyAction(key){
+  // When dead, only Space restarts the run; everything else is locked.
+  if(state.dead){
+    if(key === ' ') restartGameAfterDeath();
+    return;
+  }
   if(key==='w'||key==='W'||key==='ArrowUp')         tryMoveForward();
   else if(key==='s'||key==='S'||key==='ArrowDown')  tryMoveBackward();
   else if(key==='a'||key==='A'||key==='ArrowLeft')  rotate(-1);
@@ -1513,6 +1608,12 @@ function loop(){
   tickEnemyLunge(now);
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
+  // Death tilt: camera pitches down to the floor over 1.4s. Layered after
+  // shake so it overrides any tail-end shake noise on the X rotation.
+  if(state.dead){
+    const t = Math.min(1, (now - state.deathStartTs) / 1400);
+    camera.rotation.x = -t * Math.PI * 0.5;
+  }
   renderer.render(scene, camera);
 }
 loop();
