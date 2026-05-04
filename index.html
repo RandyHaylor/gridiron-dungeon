@@ -583,6 +583,7 @@ function initThree(){
   document.getElementById('game').appendChild(renderer.domElement);
 
   const amb = new THREE.AmbientLight(0xffffff, 0.5);
+  amb.name = 'ambient';
   scene.add(amb);
   const torch = new THREE.PointLight(0xffaa66, 1.6, CELL*3, 2);
   torch.name='torch';
@@ -2188,23 +2189,31 @@ function applyTorchLightingEffects(){
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: distinctly darker than 'low'. Fog pushed beyond the
-    // current room's far wall so the room walls are clearly visible;
-    // everything past is void anyway.
-    // Torch out: even dimmer point light + fuzzier fog gradient than
-    // when lit. Fog starts right at the camera so every wall is at
-    // least partially shadowed; long ramp out for soft borders.
-    if(torch){ torch.intensity = 0.08; torch.distance = CELL * 0.9; }
-    if(scene && scene.fog){
-      // Tighter fog: own room walls visible-but-dim; neighbor cells
-      // are mostly black, only their nearest edges (door/wall silhouette
-      // facing the player) hinted out of the darkness.
-      scene.fog.near = CELL * 0.3 + centerBias;
-      scene.fog.far  = CELL * 0.65 + centerBias;
+    // Torch out: ditch the camera-anchored point-light + fog approach.
+    // Instead, plant the point light at the player's ROOM CENTER with a
+    // tight range (~55% of room width radius). Walls and doors of the
+    // own cell fall inside this ring of light; corners and adjacent
+    // rooms fall outside. This means rotation does not change what is
+    // illuminated — eliminating the wall-shadow flicker / next-room
+    // peeks the camera-relative fog suffered from.
+    const cx = state.player.x * CELL + CELL/2;
+    const cz = state.player.y * CELL + CELL/2;
+    if(torch){
+      torch.intensity = 1.6;
+      torch.distance  = CELL * 0.9;        // ring radius -> walls in, corners out
+      torch.position.set(cx, WALL_H * 0.55, cz);
     }
+    // Drop ambient to 0 so unlit geometry reads as fully black.
+    const amb = scene && scene.getObjectByName('ambient');
+    if(amb) amb.intensity = 0;
+    // Push fog so far it doesn't darken the lit ring further.
+    if(scene && scene.fog){ scene.fog.near = 100; scene.fog.far = 200; }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
   }
+  // Torch lit — restore ambient and let the camera-anchored torch own the room.
+  const amb = scene && scene.getObjectByName('ambient');
+  if(amb) amb.intensity = 0.5;
   // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
   // 'lit' and 'no-torch' params in sync with the sprite's black/normal
   // toggle, so the room dips to the torch-out look during dark frames.
