@@ -65,7 +65,7 @@
     50%  { transform: translate(-70px,-40px) rotate(-65deg); }
     100% { transform: translate(0, 0)        rotate(20deg); }
   }
-  .hand.right.attackSwing { animation: attackSwingKf 140ms ease-in-out; }
+  .hand.right.attackSwing { animation: attackSwingKf 168ms ease-in-out; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -393,12 +393,12 @@ const state = {
     visitedKeys:   new Set(), // unique "<level>:<x>:<y>" cells entered
   },
 };
-const PLAYER_SWING_TOTAL_MS = 140;   // matches CSS attackSwingKf duration (halved)
-const ENEMY_HIT_FLASH_MS = 70;
-const ENEMY_LUNGE_DURATION_MS = 160;
+const PLAYER_SWING_TOTAL_MS = 168;   // 140 + 20%, matches CSS attackSwingKf
+const ENEMY_HIT_FLASH_MS = 84;
+const ENEMY_LUNGE_DURATION_MS = 192;
 const ENEMY_LUNGE_DEPTH = 0.8;       // world units enemy moves toward camera at peak
 const ANIM_DURATION_MS = 250;
-const ATTACK_SWING_DURATION_MS = 110; // camera yaw bob — runs WITH sword swing (halved)
+const ATTACK_SWING_DURATION_MS = 132; // 110 + 20%
 const SCREEN_SHAKE_DURATION_MS = 220;
 const SCREEN_SHAKE_MAGNITUDE = 0.18;
 const ENEMY_BOB_AMPLITUDE = 0.06;
