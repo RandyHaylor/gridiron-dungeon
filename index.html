@@ -504,7 +504,7 @@ const state = {
   level: 1,
   player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0,
             inv:['Healing Herb','Healing Herb'],
-            weapon: { name:'Fists', atk:1 },
+            weapon: { name:'Fists', atk:2 },
             shield: { name:'None',  dr:0 },
             torchCharges: 75 + Math.floor(Math.random()*16) },
   dungeon: null,
@@ -1127,7 +1127,7 @@ function descendStairs(){
 // Weapons table: name -> attack value. Anything in here is treated as a weapon
 // (only one carried at a time; picking a new one drops the current onto the floor).
 const WEAPON_STATS = {
-  'Fists':       1,
+  'Fists':       2,
   'Rusty Sword': 3,
   'Iron Sword':  5,
   'Steel Sword': 7,
