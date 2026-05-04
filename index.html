@@ -28,6 +28,15 @@
   /* 3D area: 4:3 (400x300) at top, UI takes the remaining 400px below. */
   #game { position:absolute; left:0; top:0; width:400px; height:300px; overflow:hidden; }
   #game canvas { display:block; width:400px; height:300px; }
+  /* Held-item HUD: anchored at the bottom of the 3D viewport, sprite
+     pushed half off-screen so only the top peeks up (flame for torch,
+     blade tip for sword). overflow:hidden on #game clips the rest. */
+  .hand { position:absolute; bottom:-46px; width:96px; height:96px;
+          pointer-events:none; image-rendering:pixelated; z-index:5; }
+  .hand img { width:100%; height:100%; image-rendering:pixelated; display:block; }
+  .hand.left  { left:6px;  transform: rotate(-15deg); }
+  .hand.right { right:6px; transform: rotate(20deg); }
+  .hand[hidden]{ display:none; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -37,11 +46,15 @@
   #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; position:relative; }
   /* Status panel grid: two columns of stat lines. */
   #statusGrid { display:grid; grid-template-columns: 1fr 1fr; gap:2px 12px; font-size:14px; }
-  /* Inventory overlay: covers all UI panels when shown. */
+  /* Inventory overlay: covers all UI panels when shown.
+     The [hidden] attribute on the element didn't take effect because
+     `display:flex` overrides the user-agent `display:none`; we add
+     an explicit higher-specificity rule to enforce hide. */
   #inventoryOverlay { position:absolute; left:0; right:0; top:0; bottom:0;
                        background:rgba(0,0,0,0.96); border-top:2px solid #0f0;
                        padding:10px; box-sizing:border-box; z-index:50;
                        display:flex; flex-direction:column; gap:6px; }
+  #inventoryOverlay[hidden] { display:none !important; }
   #invHeader { color:#9f9; letter-spacing:1px; border-bottom:1px solid #0a0; padding-bottom:4px; }
   #invItemList { flex:1; overflow:auto; }
   #invItemList .invRow { display:flex; align-items:center; gap:8px; padding:3px 0;
@@ -112,7 +125,12 @@
 </head>
 <body>
 <div id="wrap">
-<div id="game"></div>
+<div id="game">
+  <!-- Held items: clipped against game viewport bottom so only the
+       upper portion of the held sprite peeks up like a Doom-era HUD. -->
+  <div class="hand left"><img src="sprites/item_torch.png" alt="torch" /></div>
+  <div class="hand right" id="rightHand" hidden><img src="sprites/item_rusty_sword.png" alt="weapon" /></div>
+</div>
 <div id="compass">
   <div id="compassRose">
     <div class="ring"></div>
@@ -320,44 +338,46 @@ function initThree(){
   scene.add(torch);
 }
 
-function makeBrickTexture({ w=256, h=256, cols=8, rows=12,
-                             base='#5a4636', mortar='#1a1410', highlight='#6e5a48' } = {}){
-  const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = mortar; ctx.fillRect(0,0,w,h);
-  const bw = w/cols, bh = h/rows;
-  for(let r=0;r<rows;r++){
-    const offset = (r%2===0) ? 0 : bw/2;
-    for(let c=-1;c<cols+1;c++){
-      const x = c*bw + offset + 1;
-      const y = r*bh + 1;
-      ctx.fillStyle = base;
-      ctx.fillRect(x, y, bw-2, bh-2);
-      // subtle highlight on top edge
-      ctx.fillStyle = highlight;
-      ctx.fillRect(x, y, bw-2, 1);
-      // random speckles
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      for(let s=0;s<3;s++){
-        const sx = x + Math.random()*(bw-2);
-        const sy = y + Math.random()*(bh-2);
-        ctx.fillRect(sx, sy, 1, 1);
-      }
-    }
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.LinearMipMapLinearFilter;
-  return tex;
+// ---- Texture/sprite loading from sprites/ folder ----
+const TEX_LOADER = new THREE.TextureLoader();
+function loadTilingTexture(path, repeat=1){
+  const t = TEX_LOADER.load(path);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipMapLinearFilter;
+  t.repeat.set(repeat, repeat);
+  return t;
 }
+function loadSpriteTexture(path){
+  const t = TEX_LOADER.load(path);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearFilter;
+  return t;
+}
+const wallTex  = loadTilingTexture('sprites/tex_wall_dank_stone.png',    1);
+const floorTex = loadTilingTexture('sprites/tex_floor_dirty_stone.png',  1);
+const ceilTex  = loadTilingTexture('sprites/tex_ceiling_dark_stone.png', 1);
 
-const wallTex = makeBrickTexture({ cols:6, rows:8, base:'#6b513c', mortar:'#1c1410', highlight:'#8a6b50' });
-wallTex.repeat.set(1,1);
-const floorTex = makeBrickTexture({ cols:3, rows:3, base:'#3a3024', mortar:'#0a0805', highlight:'#5a4630' });
-floorTex.repeat.set(1,1);
-const ceilTex = makeBrickTexture({ cols:5, rows:5, base:'#1a1612', mortar:'#000', highlight:'#241c14' });
-ceilTex.repeat.set(1,1);
+// Filename map for in-world sprites (enemies + items).
+const ENEMY_SPRITE_PATH = {
+  'Giant Rat': 'sprites/enemy_giant_rat.png',
+  'Goblin':    'sprites/enemy_goblin.png',
+  'Skeleton':  'sprites/enemy_skeleton.png',
+  'Slime':     'sprites/enemy_slime.png',
+};
+const ITEM_SPRITE_PATH = {
+  'Rusty Sword':  'sprites/item_rusty_sword.png',
+  'Iron Sword':   'sprites/item_iron_sword.png',
+  'Rusty Shield': 'sprites/item_rusty_shield.png',
+  'Healing Herb': 'sprites/item_healing_herb.png',
+  'Torch':        'sprites/item_torch.png',
+};
+function makeBillboardSprite(path, worldHeight){
+  const m = new THREE.SpriteMaterial({ map:loadSpriteTexture(path), depthTest:true, transparent:true });
+  const sp = new THREE.Sprite(m);
+  sp.scale.set(worldHeight, worldHeight, 1);
+  return sp;
+}
 
 const matWall = new THREE.MeshStandardMaterial({ map:wallTex, roughness:1 });
 const matFloor = new THREE.MeshStandardMaterial({ map:floorTex, roughness:1 });
@@ -463,17 +483,24 @@ function drawRoom(c, gx, gy){
   if(c.stairs){
     drawStairsMarker(ox,oz);
   }
-  // items: small glowing boxes on floor with floating name labels
+  // items: PNG billboard sprites (fallback to glowing box for unknown names)
   c.items.forEach((name, idx)=>{
     const spread = (c.items.length>1) ? 0.7 : 0;
     const ang = (idx / Math.max(c.items.length,1)) * Math.PI*2;
     const ix = ox+CELL/2 + Math.cos(ang)*spread;
     const iz = oz+CELL/2 + Math.sin(ang)*spread;
-    const itm = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4), matItem);
-    itm.position.set(ix, 0.25, iz);
-    dungeonGroup.add(itm);
+    const path = ITEM_SPRITE_PATH[name];
+    if(path){
+      const sp = makeBillboardSprite(path, 0.7);
+      sp.position.set(ix, 0.45, iz);
+      dungeonGroup.add(sp);
+    } else {
+      const itm = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4), matItem);
+      itm.position.set(ix, 0.25, iz);
+      dungeonGroup.add(itm);
+    }
     const lbl = makeTextSprite(name);
-    lbl.position.set(ix, 0.85, iz);
+    lbl.position.set(ix, 0.95, iz);
     dungeonGroup.add(lbl);
   });
   // enemy: a red upright box; if this is the player's cell push it toward
@@ -485,9 +512,16 @@ function drawRoom(c, gx, gy){
       ex += ev[0] * CELL * 0.35;
       ez += ev[1] * CELL * 0.35;
     }
-    const eMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
-    eMesh.position.set(ex, 0.8, ez);
-    dungeonGroup.add(eMesh);
+    const path = ENEMY_SPRITE_PATH[c.enemy.name];
+    if(path){
+      const sp = makeBillboardSprite(path, 1.6);
+      sp.position.set(ex, 0.85, ez);
+      dungeonGroup.add(sp);
+    } else {
+      const eMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5), matEnemy);
+      eMesh.position.set(ex, 0.8, ez);
+      dungeonGroup.add(eMesh);
+    }
   }
 }
 
@@ -696,16 +730,18 @@ function rotate(delta){
   const p = state.player;
   const oldDir = p.dir;
   const fromYaw = yawForDir(oldDir);
-  // Capture the OLD-dir back-wall pose BEFORE mutating p.dir so the
-  // position can lerp from "near old back wall" to "near new back wall"
-  // alongside the yaw lerp. (Previous bug: snapped position on first frame.)
-  const fromPos = cameraPosForCellAndDir(p.x, p.y, oldDir);
   p.dir = ((p.dir + delta) % 4 + 4) % 4;
   const toYaw = fromYaw + shortestYawDelta(fromYaw, yawForDir(p.dir));
-  const toPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
+  // Rotate the camera-offset vector AROUND the cell center over time, so
+  // the camera traces an arc (constant radius from center), not a chord
+  // that cuts through the middle of the room and back out — that produced
+  // the "zigzag through center" feel.
   state.anim = {
-    kind:'rotate', startTs: performance.now(), durMs: ANIM_DURATION_MS,
-    fromPos, toPos, fromYaw, toYaw,
+    kind:'rotate-arc',
+    startTs: performance.now(), durMs: ANIM_DURATION_MS,
+    cellCenterX: p.x*CELL + CELL/2,
+    cellCenterZ: p.y*CELL + CELL/2,
+    fromYaw, toYaw,
     onDone: ()=>{ refreshUI(); }
   };
   // Render with new dir so any newly-visible next-ahead room is in scene
@@ -951,9 +987,25 @@ function roomAsciiMap(c, dir){
   return lines.join('\n');
 }
 
+function updateRightHandSprite(){
+  const rh = document.getElementById('rightHand');
+  if(!rh) return;
+  const wname = state.player.weapon.name;
+  if(wname === 'Fists'){
+    rh.hidden = true;
+    return;
+  }
+  const path = ITEM_SPRITE_PATH[wname];
+  if(!path){ rh.hidden = true; return; }
+  const img = rh.querySelector('img');
+  if(img.getAttribute('src') !== path) img.setAttribute('src', path);
+  rh.hidden = false;
+}
+
 function refreshUI(){
   const p = state.player;
   const c = cellAt(p.x,p.y);
+  updateRightHandSprite();
   // Compass: rotate red needle to point in player's facing dir.
   // CSS rotation: needle base points up (= North). N=0deg, E=90, S=180, W=270.
   const dirDeg = [0,90,180,270][p.dir];
@@ -1131,9 +1183,22 @@ function tickAnimation(now){
   if(!a) return;
   const t = Math.min(1, (now - a.startTs) / a.durMs);
   const e = smoothstep(t);
-  camera.position.lerpVectors(a.fromPos, a.toPos, e);
-  const yaw = a.fromYaw + (a.toYaw - a.fromYaw) * e;
-  camera.rotation.set(0, yaw, 0);
+  if(a.kind === 'rotate-arc'){
+    // The back-offset vector rotates around the cell center along an arc.
+    // Three.js camera default forward = -Z; rotated by yaw around Y, the
+    // back-from-camera direction is (sin yaw, 0, cos yaw).
+    const yaw = a.fromYaw + (a.toYaw - a.fromYaw) * e;
+    camera.position.set(
+      a.cellCenterX + Math.sin(yaw) * PLAYER_BACK_OFFSET,
+      WALL_H * 0.55,
+      a.cellCenterZ + Math.cos(yaw) * PLAYER_BACK_OFFSET
+    );
+    camera.rotation.set(0, yaw, 0);
+  } else {
+    camera.position.lerpVectors(a.fromPos, a.toPos, e);
+    const yaw = a.fromYaw + (a.toYaw - a.fromYaw) * e;
+    camera.rotation.set(0, yaw, 0);
+  }
   const torch = scene.getObjectByName('torch');
   if(torch) torch.position.copy(camera.position);
   if(t >= 1){
