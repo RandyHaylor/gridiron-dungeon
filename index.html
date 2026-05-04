@@ -720,7 +720,7 @@ function tryMoveForward(){
   if(!passageOpenInFront(here,p.dir)){
     const w = here.walls[p.dir];
     if(w.type==='door' && !w.open) log("A door blocks your path. Open it first.");
-    else log("A solid wall blocks your way.");
+    // Walls just silently refuse — no log spam when bumping a wall.
     return;
   }
   const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
@@ -761,7 +761,7 @@ function tryMoveBackward(){
   if(!passageOpenInFront(here, back)){
     const w = here.walls[back];
     if(w.type==='door' && !w.open) log("A door is shut behind you.");
-    else log("A wall is right behind you.");
+    // Walls behind: silent, same rule as forward.
     return;
   }
   const fromPos = cameraPosForCellAndDir(p.x, p.y, p.dir);
@@ -1238,29 +1238,63 @@ document.getElementById('btnStairs').onclick= descendStairs;
 document.getElementById('btnInventory').onclick = toggleInventoryOverlay;
 document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
 
-window.addEventListener('keydown', (e)=>{
-  if(e.key==='w'||e.key==='W'||e.key==='ArrowUp')    tryMoveForward();
-  else if(e.key==='s'||e.key==='S'||e.key==='ArrowDown') tryMoveBackward();
-  else if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft')  rotate(-1);
-  else if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') rotate(+1);
-  else if(e.key==='e'||e.key==='E') toggleDoor();
-  else if(e.key===' ') descendStairs();
-  else if(e.key==='t'||e.key==='T'){
+// Movement keys auto-repeat at our own rate so the player isn't blocked
+// by the OS's initial keydown-repeat delay. Other keys fire once per
+// physical press (no auto-repeat).
+const KEY_REPEAT_INTERVAL_MS = 260; // a hair longer than ANIM_DURATION_MS
+const REPEAT_KEYS = new Set([
+  'w','W','a','A','s','S','d','D',
+  'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'
+]);
+const heldRepeatingKeys = new Set();
+
+function dispatchKeyAction(key){
+  if(key==='w'||key==='W'||key==='ArrowUp')         tryMoveForward();
+  else if(key==='s'||key==='S'||key==='ArrowDown')  tryMoveBackward();
+  else if(key==='a'||key==='A'||key==='ArrowLeft')  rotate(-1);
+  else if(key==='d'||key==='D'||key==='ArrowRight') rotate(+1);
+  else if(key==='e'||key==='E') toggleDoor();
+  else if(key===' ') descendStairs();
+  else if(key==='t'||key==='T'){
     const c = cellAt(state.player.x, state.player.y);
     if(c.items.length) pickUpItem(0);
     else log("Nothing on the floor here.");
   }
-  else if(e.key==='f'||e.key==='F'){
+  else if(key==='f'||key==='F'){
     if(state.combat) combatAttack();
-    else triggerAttackSwingAnimation(); // free swing for fun/testing
+    else triggerAttackSwingAnimation();
   }
-  else if(e.key==='r'||e.key==='R'){
+  else if(key==='r'||key==='R'){
     if(state.combat) combatRun();
     else log("Nothing to run from.");
   }
-  else if(e.key==='i'||e.key==='I'){
+  else if(key==='i'||key==='I'){
     toggleInventoryOverlay();
   }
+}
+
+window.addEventListener('keydown', (e)=>{
+  // Ignore OS-driven repeats; we handle our own repeat below.
+  if(e.repeat) return;
+  dispatchKeyAction(e.key);
+  if(!REPEAT_KEYS.has(e.key)) return;
+  if(heldRepeatingKeys.has(e.key)) return;
+  heldRepeatingKeys.add(e.key);
+  const fireRepeat = ()=>{
+    if(!heldRepeatingKeys.has(e.key)) return;
+    dispatchKeyAction(e.key);
+    setTimeout(fireRepeat, KEY_REPEAT_INTERVAL_MS);
+  };
+  // First repeat fires after the same interval — no OS-style 500ms wait.
+  setTimeout(fireRepeat, KEY_REPEAT_INTERVAL_MS);
+});
+
+window.addEventListener('keyup', (e)=>{
+  heldRepeatingKeys.delete(e.key);
+});
+
+window.addEventListener('blur', ()=>{
+  heldRepeatingKeys.clear();
 });
 
 // Scale the fixed 400x800 wrap to fit the *visible* viewport (the
