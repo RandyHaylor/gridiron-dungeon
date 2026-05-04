@@ -1222,6 +1222,7 @@ function pickUpItem(idx){
   } else if(WEAPON_STATS.hasOwnProperty(item)){
     const old = state.player.weapon;
     state.player.weapon = { name:item, atk:WEAPON_STATS[item] };
+    playSfx('herb_collect');
     if(old.name !== 'Fists'){
       c.items.push(old.name);
       log(`You wield ${item} (atk ${WEAPON_STATS[item]}); you drop your ${old.name}.`);
@@ -1231,6 +1232,7 @@ function pickUpItem(idx){
   } else if(SHIELD_STATS.hasOwnProperty(item)){
     const old = state.player.shield;
     state.player.shield = { name:item, dr:SHIELD_STATS[item] };
+    playSfx('herb_collect');
     if(old.name !== 'None'){
       c.items.push(old.name);
       log(`You strap on ${item} (dmg-reduction ${SHIELD_STATS[item]}); you drop your ${old.name}.`);
@@ -1245,7 +1247,7 @@ function pickUpItem(idx){
     log("You light the torch and the dark recoils.");
   } else {
     state.player.inv.push(item);
-    if(item === 'Healing Herb' || item === 'Torch') playSfx('herb_collect');
+    playSfx('herb_collect');
     log(`You pick up: ${item}.`);
   }
   renderVisibleRooms();
