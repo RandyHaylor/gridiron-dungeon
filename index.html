@@ -2207,8 +2207,12 @@ function applyTorchLightingEffects(){
     // live in the no-fog zone and rotation does not dim them); fog.far
     // pulled in tight so neighbors fade to black quickly.
     if(scene && scene.fog){
-      scene.fog.near = CELL * 1.0; // 4 — past every own-cell wall
-      scene.fog.far  = CELL * 1.25;// 5.0 — neighbors gone fast
+      // Window narrow: between own-cell far wall (~3.6 from camera) and
+      // side-neighbor cell center (sqrt(4² + 1.6²) ≈ 4.31). Anything at
+      // or past 4.2 — including ALL neighbor content (front, side,
+      // diagonal) — is fully black, occluding it.
+      scene.fog.near = CELL * 0.95; // 3.8 — own walls still all clear
+      scene.fog.far  = CELL * 1.05; // 4.2 — past side-neighbor distance
     }
     // Lower ambient so unlit pixels read as much darker.
     const amb0 = scene && scene.getObjectByName('ambient');
