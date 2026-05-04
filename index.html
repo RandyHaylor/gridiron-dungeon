@@ -35,6 +35,17 @@
     display:grid; grid-template-rows: 1fr auto auto; gap:6px;
   }
   #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; position:relative; }
+  /* Status panel grid: two columns of stat lines. */
+  #statusGrid { display:grid; grid-template-columns: 1fr 1fr; gap:2px 12px; font-size:14px; }
+  /* Inventory overlay: covers all UI panels when shown. */
+  #inventoryOverlay { position:absolute; left:0; right:0; top:0; bottom:0;
+                       background:rgba(0,0,0,0.96); border-top:2px solid #0f0;
+                       padding:10px; box-sizing:border-box; z-index:50;
+                       display:flex; flex-direction:column; gap:6px; }
+  #invHeader { color:#9f9; letter-spacing:1px; border-bottom:1px solid #0a0; padding-bottom:4px; }
+  #invItemList { flex:1; overflow:auto; }
+  #invItemList .invRow { display:flex; align-items:center; gap:8px; padding:3px 0;
+                          border-bottom:1px dashed #050; }
   /* ROOM panel: discovered map fills the panel as a half-transparent
      backdrop; room text/items/log layer on top. */
   #roomPanel > #discoveredMap {
@@ -114,16 +125,20 @@
 </div>
 <div id="ui">
   <div class="panel" id="roomPanel">
-    <h3>ROOM</h3>
     <div id="roomDesc">—</div>
     <div id="itemList"></div>
     <div id="log"></div>
     <div id="discoveredMap" style="margin-top:6px;"></div>
   </div>
   <div class="panel" id="combatPanel">
-    <h3>STATUS</h3>
-    <div id="statusLine">—</div>
+    <div id="statusGrid"></div>
     <div id="combatActions"></div>
+    <button id="btnInventory" style="margin-top:4px;">Inventory (I)</button>
+  </div>
+  <div id="inventoryOverlay" hidden>
+    <div id="invHeader">INVENTORY <span style="font-size:11px;opacity:.7;">(I or Close to dismiss)</span></div>
+    <div id="invItemList"></div>
+    <button id="btnInvClose" style="margin-top:8px;">Close</button>
   </div>
   <div class="panel" id="movePanel">
     <div class="dpad">
@@ -248,7 +263,8 @@ function makeLevel(level){
 // -------- game state --------
 const state = {
   level: 1,
-  player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0, inv:[],
+  player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0,
+            inv:['Healing Herb','Healing Herb'],
             weapon: { name:'Fists', atk:1 },
             shield: { name:'None',  dr:0 } },
   dungeon: null,
@@ -728,6 +744,15 @@ const WEAPON_STATS = {
   'Rusty Sword': 3,
   'Iron Sword':  5,
 };
+// Consumables table: name -> use(player) function returning a log line.
+// Each use removes one of the item from inventory.
+const CONSUMABLES = {
+  'Healing Herb': (p)=>{
+    const before = p.hp;
+    p.hp = Math.min(p.hpMax, p.hp + 8);
+    return `You eat a Healing Herb. HP +${p.hp - before} (now ${p.hp}/${p.hpMax}).`;
+  }
+};
 // Shields table: name -> damage reduction (subtracted from incoming hits).
 // Same single-slot rules as weapons: picking up a different shield drops
 // the previous one onto the floor.
@@ -961,11 +986,12 @@ function refreshUI(){
   });
 
   // status / combat panel
-  let status = `HP ${p.hp}/${p.hpMax}   Gold ${p.gold}\n`;
-  status += `Wpn: ${p.weapon.name}   Attack: ${p.weapon.atk}\n`;
-  status += `Shld: ${p.shield.name}   DR: ${p.shield.dr}\n`;
-  status += `Inv: ${p.inv.length? p.inv.join(', ') : '(empty)'}`;
-  document.getElementById('statusLine').textContent = status;
+  // Status panel: two-column grid. Inventory line lives in the overlay,
+  // accessed via the Inventory (I) button beneath this grid.
+  document.getElementById('statusGrid').innerHTML =
+    `<div>HP ${p.hp}/${p.hpMax}</div><div>Gold ${p.gold}</div>` +
+    `<div>Wpn: ${p.weapon.name} (atk ${p.weapon.atk})</div>` +
+    `<div>Shld: ${p.shield.name} (DR ${p.shield.dr})</div>`;
 
   const ca = document.getElementById('combatActions');
   ca.innerHTML = '';
@@ -987,6 +1013,57 @@ function refreshUI(){
   document.getElementById('btnStairs').disabled = !c.stairs || !!state.combat;
 }
 
+// -------- inventory overlay --------
+function renderInventoryOverlay(){
+  const list = document.getElementById('invItemList');
+  list.innerHTML = '';
+  if(state.player.inv.length === 0){
+    list.innerHTML = '<div style="opacity:.7;">(no items)</div>';
+    return;
+  }
+  // Group by name with counts.
+  const counts = {};
+  state.player.inv.forEach(n => counts[n] = (counts[n]||0) + 1);
+  Object.keys(counts).forEach(name => {
+    const row = document.createElement('div'); row.className = 'invRow';
+    const label = document.createElement('div');
+    label.style.flex = '1';
+    label.textContent = `${name} x${counts[name]}`;
+    row.appendChild(label);
+    if(CONSUMABLES.hasOwnProperty(name)){
+      const useBtn = document.createElement('button');
+      useBtn.textContent = 'Use';
+      useBtn.onclick = ()=> useConsumableByName(name);
+      row.appendChild(useBtn);
+    }
+    list.appendChild(row);
+  });
+}
+function useConsumableByName(name){
+  const idx = state.player.inv.indexOf(name);
+  if(idx < 0) return;
+  state.player.inv.splice(idx, 1);
+  const fn = CONSUMABLES[name];
+  if(fn){
+    const msg = fn(state.player);
+    log(msg);
+  }
+  refreshUI();
+  renderInventoryOverlay();
+}
+function openInventoryOverlay(){
+  renderInventoryOverlay();
+  document.getElementById('inventoryOverlay').hidden = false;
+}
+function closeInventoryOverlay(){
+  document.getElementById('inventoryOverlay').hidden = true;
+}
+function toggleInventoryOverlay(){
+  const ov = document.getElementById('inventoryOverlay');
+  if(ov.hidden) openInventoryOverlay();
+  else closeInventoryOverlay();
+}
+
 // -------- bindings --------
 document.getElementById('btnFwd').onclick   = tryMoveForward;
 document.getElementById('btnBack').onclick  = tryMoveBackward;
@@ -994,6 +1071,8 @@ document.getElementById('btnLeft').onclick  = ()=>rotate(-1);
 document.getElementById('btnRight').onclick = ()=>rotate(+1);
 document.getElementById('btnDoor').onclick  = toggleDoor;
 document.getElementById('btnStairs').onclick= descendStairs;
+document.getElementById('btnInventory').onclick = toggleInventoryOverlay;
+document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
 
 window.addEventListener('keydown', (e)=>{
   if(e.key==='w'||e.key==='W'||e.key==='ArrowUp')    tryMoveForward();
@@ -1014,6 +1093,9 @@ window.addEventListener('keydown', (e)=>{
   else if(e.key==='r'||e.key==='R'){
     if(state.combat) combatRun();
     else log("Nothing to run from.");
+  }
+  else if(e.key==='i'||e.key==='I'){
+    toggleInventoryOverlay();
   }
 });
 
