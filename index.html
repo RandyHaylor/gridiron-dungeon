@@ -2132,17 +2132,17 @@ function tickAnimation(now){
 // Skips an enemy that's currently driven by the lunge animation.
 // Time-gated flicker state: re-roll multipliers every 80..200ms so the
 // flicker reads as flame-paced (slower than 60fps) and stronger.
-const _flicker = { nextRollTs: 0, lightMul: 1, spriteOp: 1 };
+// Held torch sprite flickers between FULLY DARK (filter brightness(0))
+// and its normal lit color. Hold each state long enough to be visible
+// (110..330ms) but not strobing. Ambient light pulses softly in time.
+const _flicker = { nextRollTs: 0, lightMul: 1, spriteDark: false };
 function _rollFlickerValues(now){
-  // Sprite swings harder than the ambient light: the held flame is the
-  // visual focus; ambient should pulse less.
-  let sOp = 0.30 + Math.random() * 0.70;        // 0.30..1.00
-  if(Math.random() < 0.30) sOp *= 0.30;          // chance of a deep dip
-  let lMul = 0.70 + Math.random() * 0.40;       // 0.70..1.10
-  if(Math.random() < 0.18) lMul *= 0.50;
-  _flicker.spriteOp = sOp;
+  // Bias toward bright. ~35% of holds are the dark frame.
+  _flicker.spriteDark = (Math.random() < 0.35);
+  let lMul = 0.65 + Math.random() * 0.45;       // 0.65..1.10
+  if(_flicker.spriteDark && Math.random() < 0.6) lMul *= 0.55;
   _flicker.lightMul = lMul;
-  _flicker.nextRollTs = now + 90 + Math.random() * 180; // 90..270ms hold
+  _flicker.nextRollTs = now + 110 + Math.random() * 220; // 110..330ms hold
 }
 
 // Adjust the torch point light + scene fog + left-hand HUD based on
@@ -2166,7 +2166,7 @@ function applyTorchLightingEffects(){
       scene.fog.near = CELL * 0.9 + centerBias;
       scene.fog.far  = CELL * 1.4 + centerBias;
     }
-    if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; }
+    if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
   }
   // Lit: standard point-light + fog. Flicker when charges < 10.
@@ -2175,12 +2175,20 @@ function applyTorchLightingEffects(){
     if(now >= _flicker.nextRollTs) _rollFlickerValues(now);
     intensity *= _flicker.lightMul;
     if(lh){
+      // Stop the slow fade so flicker reads as a hard cut.
       lh.style.transition = 'none';
-      lh.style.opacity = String(_flicker.spriteOp);
+      lh.style.opacity = '1';
+      // Black silhouette frame vs normal frame. brightness(0) makes the
+      // sprite render as fully dark; brightness(1) is unmodified.
+      lh.style.filter = _flicker.spriteDark ? 'brightness(0)' : 'brightness(1)';
     }
   } else {
     // Steady lit: full opacity, smooth fade transition restored.
-    if(lh){ lh.style.transition = ''; lh.style.opacity = '1'; }
+    if(lh){
+      lh.style.transition = '';
+      lh.style.opacity = '1';
+      lh.style.filter = '';
+    }
   }
   if(torch){ torch.intensity = intensity; torch.distance = distance; }
   if(scene && scene.fog){
