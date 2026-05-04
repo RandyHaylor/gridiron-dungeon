@@ -25,7 +25,7 @@
     position:absolute; left:0; top:250px; width:400px; height:450px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
     padding:6px; box-sizing:border-box; font-size:14px; line-height:1.25;
-    display:grid; grid-template-rows: auto 1fr auto; gap:6px;
+    display:grid; grid-template-rows: 1fr auto auto; gap:6px;
   }
   #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; }
   #ui h3 { margin:0 0 3px 0; font-size:13px; color:#9f9; letter-spacing:1px; }
@@ -35,16 +35,16 @@
   .dpad button { font-size:22px; padding:8px 0; line-height:1;
                  min-height:38px; }
   #ui h3 { margin:0 0 4px 0; font-size:16px; color:#9f9; letter-spacing:1px; }
-  #log { position:absolute; top:8px; left:8px; right:8px; max-height:140px; overflow:hidden;
-         background:rgba(0,0,0,0.55); padding:6px 10px; font-size:16px; pointer-events:none; }
+  #log { font-size:12px; line-height:1.2; overflow:hidden; max-height:60px; }
   #log div { opacity:.95; }
   button { background:#020; color:#0f0; border:1px solid #0a0; font-family:inherit; font-size:16px;
            padding:4px 8px; margin:2px 2px 0 0; cursor:pointer; }
   button:hover { background:#040; }
   button:disabled { color:#050; border-color:#040; cursor:not-allowed; }
   #compass { position:absolute; top:6px; right:6px; background:rgba(0,0,0,.65);
-             padding:4px 6px; border:1px solid #0a0; font-size:11px;
-             display:flex; align-items:center; gap:6px; line-height:1.05; }
+             padding:4px; border:1px solid #0a0;
+             display:flex; align-items:center; }
+  #compassText { display:none; }
   #compassRose { width:42px; height:42px; position:relative; }
   #compassRose .ring { position:absolute; inset:0; border:1px solid #0a0; border-radius:50%; }
   #compassRose .needle {
@@ -75,7 +75,6 @@
 <body>
 <div id="wrap">
 <div id="game"></div>
-<div id="log"></div>
 <div id="compass">
   <div id="compassRose">
     <div class="ring"></div>
@@ -87,6 +86,18 @@
   <div id="compassText"></div>
 </div>
 <div id="ui">
+  <div class="panel" id="roomPanel">
+    <h3>ROOM</h3>
+    <div id="roomDesc">—</div>
+    <div id="itemList"></div>
+    <div id="log"></div>
+    <div id="discoveredMap" style="margin-top:6px;"></div>
+  </div>
+  <div class="panel" id="combatPanel">
+    <h3>STATUS</h3>
+    <div id="statusLine">—</div>
+    <div id="combatActions"></div>
+  </div>
   <div class="panel" id="movePanel">
     <div class="dpad">
       <button id="btnLeft"   title="Turn left (A)">↺</button>
@@ -96,17 +107,6 @@
       <button id="btnBack"   title="Backward (S)">↓</button>
       <button id="btnStairs" title="Descend stairs (Space)">▼</button>
     </div>
-  </div>
-  <div class="panel" id="roomPanel">
-    <h3>ROOM</h3>
-    <div id="roomDesc">—</div>
-    <div id="itemList"></div>
-    <div id="discoveredMap" style="margin-top:6px;"></div>
-  </div>
-  <div class="panel" id="combatPanel">
-    <h3>STATUS</h3>
-    <div id="statusLine">—</div>
-    <div id="combatActions"></div>
   </div>
 </div>
 </div>
@@ -785,10 +785,13 @@ function buildDiscoveredLevelAsciiMap(){
   const g = Array.from({length:gh}, ()=> Array(gw).fill(' '));
   const wallH = (w)=> w.type==='wall' ? '-' : w.type==='door' ? (w.open ? ' ' : '=') : ' ';
   const wallV = (w)=> w.type==='wall' ? '|' : w.type==='door' ? (w.open ? ' ' : '"') : ' ';
+  let minRow=rows, maxRow=-1, minCol=cols, maxCol=-1;
   for(let y=0;y<rows;y++){
     for(let x=0;x<cols;x++){
       const c = d.cells[y][x];
       if(!c.seen) continue;
+      if(y<minRow) minRow=y; if(y>maxRow) maxRow=y;
+      if(x<minCol) minCol=x; if(x>maxCol) maxCol=x;
       const cx = x*2+1, cy = y*2+1;
       g[cy-1][cx-1] = '+'; g[cy-1][cx+1] = '+';
       g[cy+1][cx-1] = '+'; g[cy+1][cx+1] = '+';
@@ -801,7 +804,15 @@ function buildDiscoveredLevelAsciiMap(){
       else                          g[cy][cx] = '.';
     }
   }
-  return g.map(r=>r.join('')).join('\n');
+  if(maxRow < 0) return ''; // nothing seen yet
+  // Trim to the bounding box of seen cells (in grid-coord rows/cols).
+  const r0 = minRow*2,     r1 = maxRow*2 + 2;
+  const c0 = minCol*2,     c1 = maxCol*2 + 2;
+  const out = [];
+  for(let r=r0; r<=r1; r++){
+    out.push(g[r].slice(c0, c1+1).join(''));
+  }
+  return out.join('\n');
 }
 
 // Top-down 5x5 ASCII of current room. Walls show as #, open passage as ' ',
