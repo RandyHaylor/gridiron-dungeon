@@ -46,17 +46,15 @@
     100% { opacity:0; }
   }
   #hitFlash.active { animation: hitFlashKf 360ms ease-out; }
-  /* Attack sequence: rise (0-29%), hold while camera rotates (29-71%),
-     lower (71-100%). Total duration ~420ms = 120 raise + 180 rotate +
-     120 lower, matched to the JS-side ATTACK_SWORD_RAISE_MS and
-     ATTACK_SWING_DURATION_MS constants. */
+  /* Attack swing: slash sword down and in front (toward screen center)
+     in combination with the camera yaw rotation, then snap back.
+     Combined duration tracks the JS PLAYER_SWING_TOTAL_MS. */
   @keyframes attackSwingKf {
-    0%   { transform: rotate(20deg) translateY(0); }
-    29%  { transform: rotate(20deg) translateY(-90px); }
-    71%  { transform: rotate(20deg) translateY(-90px); }
-    100% { transform: rotate(20deg) translateY(0); }
+    0%   { transform: translate(0, 0)        rotate(20deg); }
+    50%  { transform: translate(-70px,-40px) rotate(-65deg); }
+    100% { transform: translate(0, 0)        rotate(20deg); }
   }
-  .hand.right.attackSwing { animation: attackSwingKf 420ms ease-in-out; }
+  .hand.right.attackSwing { animation: attackSwingKf 280ms ease-in-out; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -330,10 +328,14 @@ const state = {
   pendingAction: null,
   attackSwing:  null, // {startTs, durMs}
   screenShake:  null, // {startTs, until, durMs, magnitude}
+  enemyLunge:   null, // {startTs, durMs, enemyObj, basePos:Vec3, peakPos:Vec3, peakFired, onPeak, onDone}
 };
+const PLAYER_SWING_TOTAL_MS = 280;   // matches CSS attackSwingKf duration
+const ENEMY_HIT_FLASH_MS = 130;
+const ENEMY_LUNGE_DURATION_MS = 320;
+const ENEMY_LUNGE_DEPTH = 0.8;       // world units enemy moves toward camera at peak
 const ANIM_DURATION_MS = 250;
-const ATTACK_SWING_DURATION_MS = 180; // camera yaw bob (rotate phase)
-const ATTACK_SWORD_RAISE_MS = 120;    // sword rises before yaw starts
+const ATTACK_SWING_DURATION_MS = 220; // camera yaw bob — runs WITH sword swing
 const SCREEN_SHAKE_DURATION_MS = 220;
 const SCREEN_SHAKE_MAGNITUDE = 0.18;
 const ENEMY_BOB_AMPLITUDE = 0.06;
@@ -566,6 +568,8 @@ function drawRoom(c, gx, gy){
     eObj.userData.isEnemy = true;
     eObj.userData.baseY = eObj.position.y;
     eObj.userData.bobPhase = Math.random() * Math.PI * 2;
+    eObj.userData.cellX = gx;
+    eObj.userData.cellY = gy;
     dungeonGroup.add(eObj);
   }
 }
@@ -909,43 +913,55 @@ function pickUpItem(idx){
 const PLAYER_HIT_CHANCE = 0.75;
 
 function triggerAttackSwingAnimation(){
-  // Sequence: raise sword first, THEN camera yaw bob (the "swing"), THEN
-  // sword lowers. Sword CSS animation runs the full sequence; camera yaw
-  // is delayed so it kicks in while the sword is at peak.
+  // Camera yaw bob and sword down-and-forward swing run in combination,
+  // started at the same instant — no raise/hold/lower phasing.
   const rh = document.getElementById('rightHand');
-  const hasWeapon = rh && !rh.hidden;
-  if(hasWeapon){
+  if(rh && !rh.hidden){
     rh.classList.remove('attackSwing');
     void rh.offsetWidth; // force reflow so re-adding restarts the animation
     rh.classList.add('attackSwing');
   }
-  const yawStartDelayMs = hasWeapon ? ATTACK_SWORD_RAISE_MS : 0;
-  setTimeout(()=>{
-    state.attackSwing = { startTs: performance.now(), durMs: ATTACK_SWING_DURATION_MS };
-  }, yawStartDelayMs);
+  state.attackSwing = { startTs: performance.now(), durMs: ATTACK_SWING_DURATION_MS };
 }
 
 function combatAttack(){
   if(!state.combat) return;
   const e = state.combat.enemy;
   triggerAttackSwingAnimation();
-  if(R() >= PLAYER_HIT_CHANCE){
-    log(`You swing at the ${e.name} and miss!`);
+  // Pre-roll the player swing now (so the damage text in the eventual
+  // log feels matched to this swing), but defer applying it and the
+  // enemy turn until the player's full attack animation finishes.
+  const playerHit = R() < PLAYER_HIT_CHANCE;
+  const playerDmg = playerHit ? (1 + ri(state.player.weapon.atk)) : 0;
+  // Schedule the enemy red-tint flash at the peak of the rotation (mid-swing)
+  // so the visual hit lands when the sword visually does.
+  if(playerHit){
+    const peakDelayMs = Math.floor(PLAYER_SWING_TOTAL_MS * 0.5);
+    setTimeout(()=>{
+      const cellRef = state.combat && state.combat.cellRef;
+      if(!cellRef) return;
+      const enemyObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
+      if(enemyObj) flashEnemyHurtTint(enemyObj);
+    }, peakDelayMs);
+  }
+  setTimeout(()=>{
+    if(!state.combat || state.combat.enemy !== e) return;
+    if(playerHit){
+      e.hp -= playerDmg;
+      log(`You strike the ${e.name} for ${playerDmg}.`);
+      if(e.hp <= 0){
+        log(`The ${e.name} crumples to the floor!`);
+        state.combat.cellRef.enemy = null;
+        state.combat = null;
+        renderVisibleRooms();
+        refreshUI();
+        return;
+      }
+    } else {
+      log(`You swing at the ${e.name} and miss!`);
+    }
     enemyTurn();
-    return;
-  }
-  const dmg = 1 + ri(state.player.weapon.atk);
-  e.hp -= dmg;
-  log(`You strike the ${e.name} for ${dmg}.`);
-  if(e.hp <= 0){
-    log(`The ${e.name} crumples to the floor!`);
-    state.combat.cellRef.enemy = null;
-    state.combat = null;
-    renderVisibleRooms();
-    refreshUI();
-    return;
-  }
-  enemyTurn();
+  }, PLAYER_SWING_TOTAL_MS);
 }
 function combatRun(){
   if(!state.combat) return;
@@ -977,39 +993,52 @@ function enemyHitChance(){
 function enemyTurn(){
   const e = state.combat && state.combat.enemy;
   if(!e) return;
-  if(R() >= enemyHitChance()){
-    log(`The ${e.name} lunges and misses!`);
-    refreshUI();
-    return;
-  }
+  const willHit = R() < enemyHitChance();
   const raw = 1 + ri(e.atk);
   const dr = state.player.shield.dr;
-  const dmg = Math.max(0, raw - dr);
-  state.player.hp -= dmg;
-  if(dmg > 0){
-    const now = performance.now();
-    state.screenShake = {
-      startTs: now, until: now + SCREEN_SHAKE_DURATION_MS,
-      durMs: SCREEN_SHAKE_DURATION_MS, magnitude: SCREEN_SHAKE_MAGNITUDE
-    };
-    // Red veil flash on the 3D view to telegraph the hit.
-    const f = document.getElementById('hitFlash');
-    if(f){
-      f.classList.remove('active');
-      void f.offsetWidth;
-      f.classList.add('active');
+  const dmg = willHit ? Math.max(0, raw - dr) : 0;
+
+  const applyAtPeak = ()=>{
+    if(!willHit){
+      log(`The ${e.name} lunges and misses!`);
+      refreshUI();
+      return;
     }
-  }
-  if(dr > 0 && dmg < raw){
-    log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
+    state.player.hp -= dmg;
+    if(dmg > 0){
+      const now = performance.now();
+      state.screenShake = {
+        startTs: now, until: now + SCREEN_SHAKE_DURATION_MS,
+        durMs: SCREEN_SHAKE_DURATION_MS, magnitude: SCREEN_SHAKE_MAGNITUDE
+      };
+      const f = document.getElementById('hitFlash');
+      if(f){
+        f.classList.remove('active');
+        void f.offsetWidth;
+        f.classList.add('active');
+      }
+    }
+    if(dr > 0 && dmg < raw){
+      log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
+    } else {
+      log(`The ${e.name} hits you for ${dmg}.`);
+    }
+    if(state.player.hp <= 0){
+      log("You die in the dark. GAME OVER. (refresh to retry)");
+      state.combat = null;
+    }
+    refreshUI();
+  };
+
+  // Find the enemy sprite for the current combat cell to lunge it. If
+  // we can't (rare — geometry not visible), fall through to immediate.
+  const cellRef = state.combat.cellRef;
+  const enemyObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
+  if(enemyObj){
+    startEnemyLungeAnimation(enemyObj, applyAtPeak, null);
   } else {
-    log(`The ${e.name} hits you for ${dmg}.`);
+    applyAtPeak();
   }
-  if(state.player.hp <= 0){
-    log("You die in the dark. GAME OVER. (refresh to retry)");
-    state.combat = null;
-  }
-  refreshUI();
 }
 
 // -------- UI --------
@@ -1363,18 +1392,84 @@ function tickAnimation(now){
 }
 
 // Per-frame ambient bob for enemies, the stairs-down arrow, and its label.
+// Skips an enemy that's currently driven by the lunge animation.
 function bobEnemiesInPlace(now){
   if(!dungeonGroup) return;
   const w = (Math.PI * 2) / ENEMY_BOB_PERIOD_MS;
+  const lungeEnemy = state.enemyLunge ? state.enemyLunge.enemyObj : null;
   dungeonGroup.children.forEach(obj=>{
     const u = obj.userData;
     if(!u || typeof u.baseY !== 'number') return;
     if(u.isEnemy){
+      if(obj === lungeEnemy) return;
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * ENEMY_BOB_AMPLITUDE;
     } else if(u.isStairsArrow || u.isStairsLabel){
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * 0.18;
     }
   });
+}
+
+// Find the sprite/mesh for the enemy in the given grid cell, if visible.
+function findEnemySpriteForCell(cellX, cellY){
+  if(!dungeonGroup) return null;
+  for(const obj of dungeonGroup.children){
+    const u = obj.userData;
+    if(u && u.isEnemy && u.cellX === cellX && u.cellY === cellY) return obj;
+  }
+  return null;
+}
+
+// Enemy attack lunge: moves enemy ~ENEMY_LUNGE_DEPTH world units toward
+// the player camera then back over ENEMY_LUNGE_DURATION_MS. Fires onPeak
+// at the closest point (t=0.5), and onDone when the lunge fully retracts.
+function startEnemyLungeAnimation(enemyObj, onPeak, onDone){
+  const basePos = enemyObj.position.clone();
+  // Direction "toward player" = opposite of player's facing dir vector.
+  const v = DIR_VEC[state.player.dir];
+  const peakPos = basePos.clone();
+  peakPos.x -= v[0] * ENEMY_LUNGE_DEPTH;
+  peakPos.z -= v[1] * ENEMY_LUNGE_DEPTH;
+  state.enemyLunge = {
+    startTs: performance.now(),
+    durMs: ENEMY_LUNGE_DURATION_MS,
+    enemyObj, basePos, peakPos,
+    peakFired: false,
+    onPeak: onPeak || null,
+    onDone: onDone || null
+  };
+}
+
+// Briefly tint an enemy sprite red to indicate it took damage. Restores
+// the original color after ENEMY_HIT_FLASH_MS.
+function flashEnemyHurtTint(enemyObj){
+  if(!enemyObj || !enemyObj.material || !enemyObj.material.color) return;
+  const orig = enemyObj.material.color.getHex();
+  enemyObj.material.color.setHex(0xff3333);
+  setTimeout(()=>{
+    if(enemyObj.material && enemyObj.material.color){
+      enemyObj.material.color.setHex(orig);
+    }
+  }, ENEMY_HIT_FLASH_MS);
+}
+
+function tickEnemyLunge(now){
+  const l = state.enemyLunge;
+  if(!l) return;
+  const t = (now - l.startTs) / l.durMs;
+  if(t >= 1){
+    l.enemyObj.position.copy(l.basePos);
+    if(!l.peakFired && l.onPeak) l.onPeak();
+    if(l.onDone) l.onDone();
+    state.enemyLunge = null;
+    return;
+  }
+  // 0..0.5 forward, 0.5..1 back. smoothstep on each half.
+  const halfT = t < 0.5 ? smoothstep(t * 2) : smoothstep((1 - t) * 2);
+  l.enemyObj.position.lerpVectors(l.basePos, l.peakPos, halfT);
+  if(!l.peakFired && t >= 0.5){
+    l.peakFired = true;
+    if(l.onPeak) l.onPeak();
+  }
 }
 
 // 15-degree CCW-then-CW yaw bob layered on top of the camera's facing yaw.
@@ -1415,6 +1510,7 @@ function loop(){
     setCameraToCellAndDir(state.player.x, state.player.y, state.player.dir);
   }
   bobEnemiesInPlace(now);
+  tickEnemyLunge(now);
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
   renderer.render(scene, camera);
