@@ -247,6 +247,11 @@ const state = {
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
   anim: null, // {kind:'move'|'rotate', startTs, durMs, fromPos:THREE.Vector3, toPos, fromYaw, toYaw, onDone}
+  // Single-slot input buffer: if the player presses another move/rotate
+  // while an animation is mid-flight, we save it here and fire it the
+  // moment the current animation (and any chained follow-up) ends.
+  // Latest press wins (overwrites any earlier pending action).
+  pendingAction: null,
 };
 const ANIM_DURATION_MS = 500;
 
@@ -563,7 +568,7 @@ function drawStairsMarker(ox,oz){
 
 // -------- gameplay actions --------
 function tryMoveForward(){
-  if(state.anim){ return; } // input locked while moving
+  if(state.anim){ state.pendingAction = tryMoveForward; return; }
   if(state.combat){ log("You can't run blindly — you're in combat. Use Run."); return; }
   const p = state.player;
   const here = cellAt(p.x,p.y);
@@ -603,7 +608,7 @@ function enterCell(){
 // already has an enemy, chain a 180° spin animation onto the back-step so
 // the player ends up facing the threat before combat starts.
 function tryMoveBackward(){
-  if(state.anim){ return; }
+  if(state.anim){ state.pendingAction = tryMoveBackward; return; }
   if(state.combat){ log("You can't back up in combat. Use Run."); return; }
   const p = state.player;
   const back = (p.dir + 2) % 4;
@@ -649,7 +654,7 @@ function tryMoveBackward(){
 }
 
 function rotate(delta){
-  if(state.anim){ return; }
+  if(state.anim){ state.pendingAction = ()=>rotate(delta); return; }
   if(state.combat){ log("Not while fighting!"); return; }
   const p = state.player;
   const oldDir = p.dir;
@@ -991,6 +996,14 @@ function tickAnimation(now){
     const done = a.onDone;
     state.anim = null;
     if(done) done();
+    // Fire any queued action only after the full animation chain settles
+    // (e.g. back-step into-enemy-room queues a 180 spin in onDone, so
+    // wait until that finishes too before draining the buffer).
+    if(!state.anim && state.pendingAction){
+      const next = state.pendingAction;
+      state.pendingAction = null;
+      next();
+    }
   }
 }
 
