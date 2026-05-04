@@ -14,8 +14,11 @@
      the width-fit and height-fit scales are roughly equal on iPhone-sized
      viewports — width fills, height has just enough headroom for the
      dynamic browser bottom bar. */
+  /* Use outline (not border) so the green frame draws outside the box
+     and doesn't shave 2px off the inner content area, which previously
+     made the canvas overlap the right-side border. */
   #wrap { width:400px; height:700px; position:relative; background:#000;
-          border:1px solid #0a0; box-sizing:border-box;
+          outline:1px solid #0a0;
           transform-origin: top left; }
   /* 3D area is now 16:10 across the top (~31% of the wrap), giving
      the UI more than half the screen, per request. */
@@ -27,7 +30,24 @@
     padding:6px; box-sizing:border-box; font-size:14px; line-height:1.25;
     display:grid; grid-template-rows: 1fr auto auto; gap:6px;
   }
-  #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; }
+  #ui .panel { border:1px solid #0a0; padding:4px 6px; min-height:0; position:relative; }
+  /* ROOM panel: discovered map fills the panel as a half-transparent
+     backdrop; room text/items/log layer on top. */
+  #roomPanel > #discoveredMap {
+    position:absolute; inset:0; padding:4px 6px;
+    opacity:0.45; pointer-events:none;
+    overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    margin:0 !important;
+  }
+  #roomPanel > #discoveredMap pre {
+    margin:0; color:#cfc;
+    /* fluid scale: line-height tight; size left to inline style */
+  }
+  #roomPanel > h3,
+  #roomPanel > #roomDesc,
+  #roomPanel > #itemList,
+  #roomPanel > #log { position:relative; z-index:1; }
   #ui h3 { margin:0 0 3px 0; font-size:13px; color:#9f9; letter-spacing:1px; }
 
   /* Compact 2x3 symbol d-pad for movement / interaction. */
@@ -853,10 +873,10 @@ function refreshUI(){
   // Compact HUD top-right: rose + 3 short stat lines.
   document.getElementById('compassText').innerHTML =
     `Lv ${state.level}<br>(${p.x},${p.y})<br>Face ${DIR_NAMES[p.dir]}`;
-  // The big maps now live in the ROOM panel where there's room for them.
+  // The discovered map renders as a half-transparent backdrop behind the
+  // ROOM info text. No legend.
   document.getElementById('discoveredMap').innerHTML =
-    `<div style="color:#7c7;font-size:10px;margin-bottom:2px;">Map  X=stairs  ==/&quot;=door  -|=wall  ^&gt;v&lt;=you</div>` +
-    `<pre style="margin:0;color:#cfc;font-size:11px;line-height:1.0;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
+    `<pre style="margin:0;color:#cfc;font-size:18px;line-height:1.0;font-family:'Courier New',monospace;">${buildDiscoveredLevelAsciiMap()}</pre>`;
 
   // room panel
   let desc = `You stand in a stone chamber.`;
