@@ -498,6 +498,26 @@ const matItem = new THREE.MeshStandardMaterial({ color:0xffcc33, emissive:0x6644
 // Build only the visible rooms (current + next-in-front if passage is open)
 function buildScene(){
   if(dungeonGroup) scene.remove(dungeonGroup);
+  // Tear down any objects we parented directly to the scene root
+  // (phrase bubbles, detached dying enemy meshes) so they don't leak
+  // across level transitions and float over the new dungeon.
+  if(scene){
+    const stragglers = scene.children.filter(o => {
+      const u = o.userData; return u && (u.isEnemyPhrase || u.isEnemy);
+    });
+    for(const o of stragglers){
+      scene.remove(o);
+      if(o.material){
+        if(o.material.map && o.userData.isEnemyPhrase) o.material.map.dispose();
+        // Don't dispose shared textures (enemy sprite atlas) — only the
+        // canvas-generated phrase texture. Material dispose is safe here.
+        try { o.material.dispose(); } catch(_){}
+      }
+      if(o.userData.ownerEnemy && o.userData.ownerEnemy.currentPhraseSprite === o){
+        o.userData.ownerEnemy.currentPhraseSprite = null;
+      }
+    }
+  }
   dungeonGroup = new THREE.Group();
   scene.add(dungeonGroup);
   renderVisibleRooms();
