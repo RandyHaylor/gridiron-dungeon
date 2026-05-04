@@ -1305,10 +1305,16 @@ function applyScreenShake(now){
 function loop(){
   requestAnimationFrame(loop);
   const now = performance.now();
-  tickAnimation(now);
+  // Anchor the camera to its canonical pose every frame so additive
+  // overlays (attack-swing yaw and screen shake) don't accumulate
+  // random walk drift. During an animation, tickAnimation owns the
+  // pose; otherwise we snap back to the player's cell+facing pose.
+  if(state.anim){
+    tickAnimation(now);
+  } else {
+    setCameraToCellAndDir(state.player.x, state.player.y, state.player.dir);
+  }
   bobEnemiesInPlace(now);
-  // Attack-swing yaw and shake ride on top of whatever base pose the
-  // camera is currently in (set by tickAnimation or setCameraToCellAndDir).
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
   renderer.render(scene, camera);
