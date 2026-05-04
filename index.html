@@ -642,18 +642,27 @@ function makeTextSprite(text){
   return sp;
 }
 
-function drawStairsMarker(ox,oz){
-  // a black slab in the center floor with a downward indicator
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(CELL*0.6, 0.05, CELL*0.6),
-    new THREE.MeshStandardMaterial({color:0x000000, emissive:0x002200}));
-  slab.position.set(ox+CELL/2, 0.03, oz+CELL/2);
-  dungeonGroup.add(slab);
-  // down-arrow: triangle prism pointing down
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 3),
-    new THREE.MeshStandardMaterial({color:0x33ff33, emissive:0x115511}));
-  arrow.rotation.x = Math.PI;
-  arrow.position.set(ox+CELL/2, 0.5, oz+CELL/2);
-  dungeonGroup.add(arrow);
+// Lazily-loaded stairs-down floor texture (top-down hatch sprite).
+let _stairsTexCached = null;
+function getStairsDownTexture(){
+  if(_stairsTexCached) return _stairsTexCached;
+  const t = TEX_LOADER.load('sprites/floor_stairs_down.png');
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearFilter;
+  _stairsTexCached = t;
+  return t;
+}
+function drawStairsMarker(ox, oz){
+  // Flat floor plane with the stairs-down sprite, sitting just above the
+  // floor mesh to avoid z-fighting.
+  const tex = getStairsDownTexture();
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex, transparent: true, roughness: 1, side: THREE.DoubleSide
+  });
+  const stairs = new THREE.Mesh(new THREE.PlaneGeometry(CELL*0.85, CELL*0.85), mat);
+  stairs.rotation.x = -Math.PI/2;
+  stairs.position.set(ox + CELL/2, 0.02, oz + CELL/2);
+  dungeonGroup.add(stairs);
 }
 
 // -------- gameplay actions --------
