@@ -84,6 +84,17 @@
                        padding:10px; box-sizing:border-box; z-index:50;
                        display:flex; flex-direction:column; gap:6px; }
   #inventoryOverlay[hidden] { display:none !important; }
+  /* Vendor overlay: same shape as inventory; green accents to match
+     the friendly NPC. */
+  #vendorOverlay { position:absolute; left:0; right:0; top:0; bottom:0;
+                    background:rgba(0,0,0,0.96); border-top:2px solid #0f0;
+                    padding:10px; box-sizing:border-box; z-index:50;
+                    display:flex; flex-direction:column; gap:6px; }
+  #vendorOverlay[hidden] { display:none !important; }
+  #vendorHeader { color:#9f9; letter-spacing:1px; border-bottom:1px solid #0a0; padding-bottom:4px; }
+  #vendorItemList { flex:1; overflow:auto; }
+  #vendorItemList .vendorRow { display:flex; align-items:center; gap:8px; padding:3px 0;
+                                border-bottom:1px dashed #050; }
   /* Death overlay: covers the whole wrap (game + UI), fades to black,
      then message / stats / button fade in via cascading transitions. */
   #deathOverlay { position:absolute; inset:0; background:#000; z-index:80;
@@ -237,6 +248,11 @@
     <div id="deathStats"></div>
     <button id="btnPlayAgain">Play Again (Space)</button>
   </div>
+  <div id="vendorOverlay" hidden>
+    <div id="vendorHeader">VENDOR <span style="font-size:11px;opacity:.7;">(V or Close to dismiss)</span></div>
+    <div id="vendorItemList"></div>
+    <button id="btnVendorClose" style="margin-top:8px;">Close</button>
+  </div>
   <div id="inventoryOverlay" hidden>
     <div id="invHeader">INVENTORY <span style="font-size:11px;opacity:.7;">(I or Close to dismiss)</span></div>
     <div id="invItemList"></div>
@@ -364,6 +380,17 @@ function makeLevel(level){
     if(c.enemy || c.stairs) continue;
     const t = choice(eligibleEnemies);
     c.enemy = { ...t, hpMax:t.hp };
+  }
+
+  // Place exactly one friendly Vendor in a random non-start, non-stairs,
+  // non-enemy cell so every level has a place to buy supplies.
+  for(let attempt=0; attempt<30; attempt++){
+    const vx = ri(W_), vy = ri(H_);
+    if(vx===px && vy===py) continue;
+    const c = cellAt(vx, vy);
+    if(c.stairs || c.enemy) continue;
+    c.npc = { name: 'Vendor' };
+    break;
   }
 
   return { W_, H_, cells, px, py };
@@ -672,6 +699,26 @@ function drawRoom(c, gx, gy){
     // cleared here.
     dungeonGroup.add(eObj);
   }
+  // Friendly NPC (vendor) — same billboard treatment, no combat.
+  if(c.npc){
+    const path = NPC_SPRITE_PATH[c.npc.name];
+    let nObj;
+    if(path){
+      nObj = makeBillboardSprite(path, 1.6);
+      nObj.position.set(ox+CELL/2, 0.85, oz+CELL/2);
+    } else {
+      nObj = new THREE.Mesh(new THREE.BoxGeometry(0.8,1.6,0.5),
+        new THREE.MeshStandardMaterial({color:0x55cc55, emissive:0x114411}));
+      nObj.position.set(ox+CELL/2, 0.8, oz+CELL/2);
+    }
+    nObj.userData.isNpc   = true;
+    nObj.userData.baseY   = nObj.position.y;
+    nObj.userData.bobPhase = Math.random()*Math.PI*2;
+    nObj.userData.cellX   = gx;
+    nObj.userData.cellY   = gy;
+    nObj.userData.npcRef  = c.npc;
+    dungeonGroup.add(nObj);
+  }
 }
 
 function drawWall(w, dir, ox, oz, c){
@@ -855,6 +902,8 @@ function enterCell(){
   if(c.enemy){
     state.combat = { enemy: c.enemy, cellRef: c };
     log(`A ${c.enemy.name} blocks the way! (HP ${c.enemy.hp}/${c.enemy.hpMax})`);
+  } else if(c.npc){
+    log(`A ${c.npc.name} greets you. Press V to trade.`);
   }
   renderVisibleRooms();
   refreshUI();
@@ -1461,6 +1510,63 @@ function restartGameAfterDeath(){
   location.reload();
 }
 
+// -------- vendor overlay --------
+// Stock list: { name, price, kind } — kind 'consumable' lands in inv as
+// usable Healing Herb (existing CONSUMABLES table handles it).
+const VENDOR_STOCK = [
+  { name: 'Healing Herb', price: 3, kind: 'consumable' },
+];
+function renderVendorOverlay(){
+  const list = document.getElementById('vendorItemList');
+  list.innerHTML = '';
+  for(const item of VENDOR_STOCK){
+    const row = document.createElement('div'); row.className = 'vendorRow';
+    const label = document.createElement('div');
+    label.style.flex = '1';
+    label.textContent = `${item.name}  —  ${item.price}gp`;
+    row.appendChild(label);
+    const btn = document.createElement('button');
+    btn.textContent = `Buy (${item.price}gp)`;
+    btn.disabled = state.player.gold < item.price;
+    btn.onclick = ()=> buyFromVendor(item);
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
+  const goldRow = document.createElement('div');
+  goldRow.style.marginTop = '8px';
+  goldRow.style.color = '#cfc';
+  goldRow.textContent = `Your gold: ${state.player.gold}gp`;
+  list.appendChild(goldRow);
+}
+function buyFromVendor(item){
+  if(state.player.gold < item.price){
+    log("Not enough gold.");
+    return;
+  }
+  state.player.gold -= item.price;
+  state.player.inv.push(item.name);
+  log(`Bought ${item.name} for ${item.price}gp.`);
+  refreshUI();
+  renderVendorOverlay();
+}
+function isOnVendorCell(){
+  const c = cellAt(state.player.x, state.player.y);
+  return !!(c && c.npc);
+}
+function openVendorOverlay(){
+  if(!isOnVendorCell()){ log("No vendor here."); return; }
+  renderVendorOverlay();
+  document.getElementById('vendorOverlay').hidden = false;
+}
+function closeVendorOverlay(){
+  document.getElementById('vendorOverlay').hidden = true;
+}
+function toggleVendorOverlay(){
+  const ov = document.getElementById('vendorOverlay');
+  if(ov.hidden) openVendorOverlay();
+  else closeVendorOverlay();
+}
+
 // -------- inventory overlay --------
 function renderInventoryOverlay(){
   const list = document.getElementById('invItemList');
@@ -1538,6 +1644,7 @@ document.getElementById('btnDoor').onclick  = toggleDoor;
 document.getElementById('btnStairs').onclick= descendStairs;
 document.getElementById('btnInventory').onclick = toggleInventoryOverlay;
 document.getElementById('btnInvClose').onclick  = closeInventoryOverlay;
+document.getElementById('btnVendorClose').onclick = closeVendorOverlay;
 document.getElementById('btnPlayAgain').onclick = restartGameAfterDeath;
 
 // Movement keys auto-repeat at our own rate so the player isn't blocked
@@ -1582,6 +1689,9 @@ function dispatchKeyAction(key){
   else if(key==='h'||key==='H'){
     if(state.player.inv.includes('Healing Herb')) useConsumableByName('Healing Herb');
     else log("No Healing Herb to use.");
+  }
+  else if(key==='v'||key==='V'){
+    toggleVendorOverlay();
   }
 }
 
@@ -1686,7 +1796,7 @@ function bobEnemiesInPlace(now){
   dungeonGroup.children.forEach(obj=>{
     const u = obj.userData;
     if(!u || typeof u.baseY !== 'number') return;
-    if(u.isEnemy){
+    if(u.isEnemy || u.isNpc){
       if(obj === lungeEnemy) return;
       if(u.dying) return;
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * ENEMY_BOB_AMPLITUDE;
@@ -1735,6 +1845,14 @@ const ENEMY_PHRASE_FILE = {
   'Cave Troll': 'enemies/cave_troll.json',
   'Lich':       'enemies/lich.json',
 };
+// Friendly NPCs (no combat). Their phrase libraries share the same
+// loader/lookup as enemies; the bubble border is green at draw time.
+const NPC_PHRASE_FILE = {
+  'Vendor': 'npcs/vendor.json',
+};
+const NPC_SPRITE_PATH = {
+  'Vendor': 'sprites/npc_vendor.png',
+};
 // Library entries: {phrases:[...speech...], movements:[...action...]}.
 // Inline fallback covers the case when the JSON fetch fails. Async loader
 // below replaces values on success.
@@ -1751,6 +1869,11 @@ const enemyPhraseLibrariesByName = {
                   movements: ['thuds','drools','stomps'] },
   'Lich':       { phrases: ['Mortal worm','Bow.','Necromancy','Pitiful','Centuries old'],
                   movements: ['drifts','weaves a sigil','staff thumps'] },
+  // NPCs use the same library shape; presence here also means the loader
+  // will pull a richer set from npcs/<name>.json when fetch succeeds.
+  'Vendor':     { phrases: ['Welcome, traveler','Best prices','Fresh wares!',
+                            'Press V, I trade','Stay a while','Trust me, friend'],
+                  movements: ['polishes a coin','smiles','bows slightly'] },
 };
 // Shared cross-enemy list of comical lines. 10% of every phrase emission
 // gets pulled from this instead of the enemy's own library, popped from
@@ -1779,7 +1902,8 @@ const FUNNY_SHARED_PHRASES = [
 ];
 const FUNNY_PHRASE_CHANCE = 0.10;
 async function loadAllEnemyPhraseLibraries(){
-  await Promise.all(Object.entries(ENEMY_PHRASE_FILE).map(async ([name, path])=>{
+  const all = Object.entries(ENEMY_PHRASE_FILE).concat(Object.entries(NPC_PHRASE_FILE));
+  await Promise.all(all.map(async ([name, path])=>{
     try{
       const r = await fetch(path);
       if(!r.ok) return;
@@ -1838,7 +1962,11 @@ function reapOrphanedPhraseSprites(){
     const u = obj.userData;
     if(!u || !u.isEnemyPhrase) continue;
     const owner = u.ownerEnemy;
-    const ownerAlive = owner && owner.hp > 0 && owner.currentPhraseSprite === obj;
+    // NPCs have no hp; treat them as alive as long as they still claim
+    // this sprite. Enemies must additionally have hp > 0.
+    const isNpcOwner = owner && owner.name === 'Vendor';
+    const ownerAlive = owner && owner.currentPhraseSprite === obj &&
+      (isNpcOwner || owner.hp > 0);
     if(!ownerAlive) toRemove.push(obj);
   }
   for(const sp of toRemove){
@@ -1857,8 +1985,9 @@ function tickEnemyPhrases(now){
   if(!dungeonGroup || !scene) return;
   for(const obj of dungeonGroup.children){
     const u = obj.userData;
-    if(!u || !u.isEnemy || u.dying) continue;
-    const enemy = u.enemyRef;
+    if(!u || u.dying) continue;
+    if(!u.isEnemy && !u.isNpc) continue;
+    const enemy = u.enemyRef || u.npcRef;
     if(!enemy) continue;
 
     if(typeof enemy.nextPhraseAt !== 'number'){
@@ -1895,7 +2024,10 @@ function tickEnemyPhrases(now){
       if(!phrase){ enemy.nextPhraseAt = now + 5000; continue; }
       // Movements wrap with asterisks; speech and funny render plain.
       const display = (phrase.kind === 'movement') ? `*${phrase.text}*` : phrase.text;
-      const sp = makeTextSprite(display, { borderColor: '#f44', textColor: '#ffd9d9' });
+      const friendly = !!u.isNpc;
+      const borderColor = friendly ? '#4f4' : '#f44';
+      const textColor   = friendly ? '#dfffdf' : '#ffd9d9';
+      const sp = makeTextSprite(display, { borderColor, textColor });
       sp.position.set(obj.position.x, obj.position.y + 1.25, obj.position.z);
       // depthTest stays true so walls / doors occlude the bubble like a
       // real object in the world.
