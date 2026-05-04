@@ -46,6 +46,17 @@
     100% { opacity:0; }
   }
   #hitFlash.active { animation: hitFlashKf 360ms ease-out; }
+  /* Big red damage number on player hit. */
+  #playerDamageNum { position:absolute; left:0; right:0; top:30%;
+                     text-align:center; font-size:84px; font-weight:bold;
+                     color:#ff3030; pointer-events:none; opacity:0;
+                     z-index:9; font-family:"VT323","Courier New",monospace;
+                     text-shadow: 0 0 12px #800, 0 0 24px #400; }
+  @keyframes playerDamageNumKf {
+    0%   { opacity:1; transform:translateY(0); }
+    100% { opacity:0; transform:translateY(-40px); }
+  }
+  #playerDamageNum.show { animation: playerDamageNumKf 700ms ease-out forwards; }
   /* Attack swing: slash sword down and in front (toward screen center)
      in combination with the camera yaw rotation, then snap back.
      Combined duration tracks the JS PLAYER_SWING_TOTAL_MS. */
@@ -54,7 +65,7 @@
     50%  { transform: translate(-70px,-40px) rotate(-65deg); }
     100% { transform: translate(0, 0)        rotate(20deg); }
   }
-  .hand.right.attackSwing { animation: attackSwingKf 280ms ease-in-out; }
+  .hand.right.attackSwing { animation: attackSwingKf 140ms ease-in-out; }
   #ui {
     position:absolute; left:0; top:300px; width:400px; height:400px;
     background:rgba(0,0,0,0.92); border-top:2px solid #0f0;
@@ -193,6 +204,8 @@
   <div class="hand right" id="rightHand" hidden><img src="sprites/item_rusty_sword.png" alt="weapon" /></div>
   <!-- Red flash overlay: pulsed when an enemy hit lands. -->
   <div id="hitFlash"></div>
+  <!-- Big red damage number when the player gets hit. -->
+  <div id="playerDamageNum"></div>
 </div>
 <div id="compass">
   <div id="compassRose">
@@ -380,12 +393,12 @@ const state = {
     visitedKeys:   new Set(), // unique "<level>:<x>:<y>" cells entered
   },
 };
-const PLAYER_SWING_TOTAL_MS = 280;   // matches CSS attackSwingKf duration
-const ENEMY_HIT_FLASH_MS = 130;
-const ENEMY_LUNGE_DURATION_MS = 320;
+const PLAYER_SWING_TOTAL_MS = 140;   // matches CSS attackSwingKf duration (halved)
+const ENEMY_HIT_FLASH_MS = 70;
+const ENEMY_LUNGE_DURATION_MS = 160;
 const ENEMY_LUNGE_DEPTH = 0.8;       // world units enemy moves toward camera at peak
 const ANIM_DURATION_MS = 250;
-const ATTACK_SWING_DURATION_MS = 220; // camera yaw bob — runs WITH sword swing
+const ATTACK_SWING_DURATION_MS = 110; // camera yaw bob — runs WITH sword swing (halved)
 const SCREEN_SHAKE_DURATION_MS = 220;
 const SCREEN_SHAKE_MAGNITUDE = 0.18;
 const ENEMY_BOB_AMPLITUDE = 0.06;
@@ -713,11 +726,15 @@ function makeTextSprite(text, opts){
   // redo because resizing canvas resets ctx
   const c2 = cv.getContext('2d');
   c2.font = font;
-  c2.fillStyle = 'rgba(0,0,0,0.7)';
-  c2.fillRect(0,0,cv.width,cv.height);
-  c2.strokeStyle = borderColor;
-  c2.lineWidth = 2;
-  c2.strokeRect(1,1,cv.width-2,cv.height-2);
+  if(!opts.noBackground){
+    c2.fillStyle = 'rgba(0,0,0,0.7)';
+    c2.fillRect(0,0,cv.width,cv.height);
+  }
+  if(!opts.noBorder){
+    c2.strokeStyle = borderColor;
+    c2.lineWidth = 2;
+    c2.strokeRect(1,1,cv.width-2,cv.height-2);
+  }
   c2.fillStyle = textColor;
   c2.textBaseline = 'middle';
   c2.fillText(text, padX, cv.height/2);
@@ -1023,7 +1040,10 @@ function combatAttack(){
       const cellRef = state.combat && state.combat.cellRef;
       if(!cellRef) return;
       const enemyObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
-      if(enemyObj) flashEnemyHurtTint(enemyObj);
+      if(enemyObj){
+        flashEnemyHurtTint(enemyObj);
+        spawnFloatingDamageNumberAboveEnemy(playerDmg, enemyObj);
+      }
     }, peakDelayMs);
   }
   setTimeout(()=>{
@@ -1135,6 +1155,7 @@ function enemyTurn(){
         void f.offsetWidth;
         f.classList.add('active');
       }
+      showPlayerDamageNumberHud(dmg);
     }
     if(dr > 0 && dmg < raw){
       log(`The ${e.name} hits you for ${dmg} (your ${state.player.shield.name} blocked ${raw - dmg}).`);
@@ -1853,6 +1874,51 @@ function playEnemyDeathAnimation(enemyObj, onDone){
     }
   };
   tick();
+}
+
+// Spawn a red damage number above an enemy sprite that floats up and
+// fades out over ~700ms. Sprite is parented to the scene so it survives
+// re-renders.
+function spawnFloatingDamageNumberAboveEnemy(amount, enemyObj){
+  if(!enemyObj || !scene) return;
+  const sp = makeTextSprite(`-${amount}`, {
+    textColor: '#ff5050', noBorder: true, noBackground: true
+  });
+  // Bigger than a phrase: scale up.
+  sp.scale.multiplyScalar(1.6);
+  const baseX = enemyObj.position.x;
+  const baseY = enemyObj.position.y + 1.0;
+  const baseZ = enemyObj.position.z;
+  sp.position.set(baseX, baseY, baseZ);
+  sp.material.opacity = 1;
+  scene.add(sp);
+  const startTs = performance.now();
+  const durMs = 700;
+  const tick = ()=>{
+    const t = (performance.now() - startTs) / durMs;
+    if(t >= 1){
+      scene.remove(sp);
+      if(sp.material){
+        if(sp.material.map) sp.material.map.dispose();
+        sp.material.dispose();
+      }
+      return;
+    }
+    sp.position.y = baseY + t * 1.2;
+    sp.material.opacity = 1 - t;
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+// Show a big red damage number HUD overlay (player took dmg). Quick fade.
+function showPlayerDamageNumberHud(amount){
+  const el = document.getElementById('playerDamageNum');
+  if(!el) return;
+  el.textContent = String(amount);
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
 }
 
 // Briefly tint an enemy sprite red to indicate it took damage. Restores
