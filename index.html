@@ -334,28 +334,35 @@ function makeLevel(level){
   do { sx=ri(W_); sy=ri(H_); } while(Math.abs(sx-px)+Math.abs(sy-py) < 6);
   cellAt(sx,sy).stairs=true;
 
-  // Sprinkle items
-  const itemsPool = ['Rusty Sword','Healing Herb','Gold (5gp)','Torch','Rusty Shield'];
+  // Sprinkle items. Sword tier gates by dungeon level: rusty always,
+  // iron from L4, steel from L6.
+  const itemsPool = ['Healing Herb','Gold (5gp)','Torch','Rusty Shield','Rusty Sword'];
+  if(level >= 4) itemsPool.push('Iron Sword');
+  if(level >= 6) itemsPool.push('Steel Sword');
   for(let i=0;i<5;i++){
     const c = cells[ri(H_)][ri(W_)];
     if(c.stairs) continue;
     c.items.push(choice(itemsPool));
   }
 
-  // Sprinkle enemies (not in player's start cell, not on stairs)
+  // Sprinkle enemies (not in player's start cell, not on stairs).
+  // Level-gated pool: skeletons L2+, cave trolls L4+, liches L6+.
   const enemiesPool = [
-    {name:'Giant Rat', hp:5, atk:2},
-    {name:'Goblin',    hp:8, atk:3},
-    {name:'Skeleton',  hp:10,atk:4},
-    {name:'Slime',     hp:6, atk:2},
+    {name:'Giant Rat',  hp:5,  atk:2, minLevel:1},
+    {name:'Goblin',     hp:8,  atk:3, minLevel:1},
+    {name:'Slime',      hp:6,  atk:2, minLevel:1},
+    {name:'Skeleton',   hp:10, atk:4, minLevel:2},
+    {name:'Cave Troll', hp:18, atk:6, minLevel:4},
+    {name:'Lich',       hp:14, atk:7, minLevel:6},
   ];
+  const eligibleEnemies = enemiesPool.filter(e => e.minLevel <= level);
   const enemyCount = 3 + level;
   for(let i=0;i<enemyCount;i++){
     const ex=ri(W_), ey=ri(H_);
     if(ex===px && ey===py) continue;
     const c=cellAt(ex,ey);
     if(c.enemy || c.stairs) continue;
-    const t = choice(enemiesPool);
+    const t = choice(eligibleEnemies);
     c.enemy = { ...t, hpMax:t.hp };
   }
 
@@ -467,14 +474,17 @@ const ceilTex  = loadTilingTexture('sprites/tex_ceiling_dark_stone.png', 1);
 
 // Filename map for in-world sprites (enemies + items).
 const ENEMY_SPRITE_PATH = {
-  'Giant Rat': 'sprites/enemy_giant_rat.png',
-  'Goblin':    'sprites/enemy_goblin.png',
-  'Skeleton':  'sprites/enemy_skeleton.png',
-  'Slime':     'sprites/enemy_slime.png',
+  'Giant Rat':  'sprites/enemy_giant_rat.png',
+  'Goblin':     'sprites/enemy_goblin.png',
+  'Skeleton':   'sprites/enemy_skeleton.png',
+  'Slime':      'sprites/enemy_slime.png',
+  'Cave Troll': 'sprites/enemy_cave_troll.png',
+  'Lich':       'sprites/enemy_lich.png',
 };
 const ITEM_SPRITE_PATH = {
   'Rusty Sword':  'sprites/item_rusty_sword.png',
   'Iron Sword':   'sprites/item_iron_sword.png',
+  'Steel Sword':  'sprites/item_steel_sword.png',
   'Rusty Shield': 'sprites/item_rusty_shield.png',
   'Healing Herb': 'sprites/item_healing_herb.png',
   'Torch':        'sprites/item_torch.png',
@@ -956,6 +966,7 @@ const WEAPON_STATS = {
   'Fists':       1,
   'Rusty Sword': 3,
   'Iron Sword':  5,
+  'Steel Sword': 7,
 };
 // Consumables table: name -> use(player) function returning a log line.
 // Each use removes one of the item from inventory.
@@ -1717,23 +1728,29 @@ function startEnemyLungeAnimation(enemyObj, onPeak, onDone){
 
 // ---------- enemy chatter (random phrases) ----------
 const ENEMY_PHRASE_FILE = {
-  'Giant Rat': 'enemies/giant_rat.json',
-  'Goblin':    'enemies/goblin.json',
-  'Skeleton':  'enemies/skeleton.json',
-  'Slime':     'enemies/slime.json',
+  'Giant Rat':  'enemies/giant_rat.json',
+  'Goblin':     'enemies/goblin.json',
+  'Skeleton':   'enemies/skeleton.json',
+  'Slime':      'enemies/slime.json',
+  'Cave Troll': 'enemies/cave_troll.json',
+  'Lich':       'enemies/lich.json',
 };
 // Library entries: {phrases:[...speech...], movements:[...action...]}.
 // Inline fallback covers the case when the JSON fetch fails. Async loader
 // below replaces values on success.
 const enemyPhraseLibrariesByName = {
-  'Giant Rat': { phrases: ['Squeak!','Cheese?','Nibble nibble','My turf','Plague!','Tiny terror'],
-                 movements: ['scurries','sniffs','bares fangs'] },
-  'Goblin':    { phrases: ['Squishy human!','Get out!','I see you','My loot!','Stab stab','Tribe rule!'],
-                 movements: ['snickers','spits','picks nose'] },
-  'Skeleton':  { phrases: ['Bones rattle...','Cold grave','Endless duty','Forever still','Dust to dust'],
-                 movements: ['clatters','bones grind','creaks'] },
-  'Slime':     { phrases: ['Glorp!','Squish!','Wibble wobble','Goo goo','Sticky hello','Sploosh'],
-                 movements: ['jiggles','oozes','plops'] },
+  'Giant Rat':  { phrases: ['Squeak!','Cheese?','Nibble nibble','My turf','Plague!','Tiny terror'],
+                  movements: ['scurries','sniffs','bares fangs'] },
+  'Goblin':     { phrases: ['Squishy human!','Get out!','I see you','My loot!','Stab stab','Tribe rule!'],
+                  movements: ['snickers','spits','picks nose'] },
+  'Skeleton':   { phrases: ['Bones rattle...','Cold grave','Endless duty','Forever still','Dust to dust'],
+                  movements: ['clatters','bones grind','creaks'] },
+  'Slime':      { phrases: ['Glorp!','Squish!','Wibble wobble','Goo goo','Sticky hello','Sploosh'],
+                  movements: ['jiggles','oozes','plops'] },
+  'Cave Troll': { phrases: ['GRRR!','Smash!','Hungry...','Crush!','Big mad','Tiny human'],
+                  movements: ['thuds','drools','stomps'] },
+  'Lich':       { phrases: ['Mortal worm','Bow.','Necromancy','Pitiful','Centuries old'],
+                  movements: ['drifts','weaves a sigil','staff thumps'] },
 };
 // Shared cross-enemy list of comical lines. 10% of every phrase emission
 // gets pulled from this instead of the enemy's own library, popped from
