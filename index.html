@@ -2245,11 +2245,11 @@ function applyTorchLightingEffects(){
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: range = 4 (= CELL, one room wide), gentle 0.2 decay.
+    // Torch out: range 2, intensity 0.5, decay 2 (steep inverse-square).
     if(torch){
-      torch.intensity = 2;     // dimmer overall
-      torch.distance  = 4;
-      torch.decay     = 0.2;
+      torch.intensity = 0.5;
+      torch.distance  = 2;
+      torch.decay     = 2;
     }
     if(ambLight) ambLight.intensity = 0;
     if(scene && scene.fog){
