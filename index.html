@@ -4,6 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Atari-style Dungeon Crawler MVP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<!-- VT323 = IBM VT-style monochrome terminal font, the closest match to
+     the 8086-era PC text-mode look. Already referenced in the CSS stack. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&display=swap" />
 <style>
   html,body { margin:0; padding:0; background:#111; color:#0f0;
               font-family: "VT323","Courier New",monospace; overflow:hidden;
@@ -47,7 +52,10 @@
   #roomPanel > h3,
   #roomPanel > #roomDesc,
   #roomPanel > #itemList,
-  #roomPanel > #log { position:relative; z-index:1; }
+  #roomPanel > #log { position:relative; z-index:1; opacity:0.78; }
+  /* Buttons inside ROOM panel (item Take buttons) stay fully opaque so
+     they remain readable/tappable. */
+  #roomPanel > #itemList button { opacity:1; }
   #ui h3 { margin:0 0 3px 0; font-size:13px; color:#9f9; letter-spacing:1px; }
 
   /* Compact 2x3 symbol d-pad for movement / interaction. */
