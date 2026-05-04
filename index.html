@@ -386,20 +386,33 @@ function renderVisibleRooms(){
   // straight hallway opens up, plus side-rooms reachable by going around
   // a corner one step. Pre-rendering the wider set means rotation /
   // forward animations have geometry already in place (no black flash).
+  // Mark the player's own cell as seen (you're physically in it).
+  here.seen = true;
+  // Mark the cell directly in front as seen ONLY if there's an open
+  // passage or open door between you and it (you can see straight ahead).
+  // Side and diagonal cells are NOT auto-marked even if reachable —
+  // walking into them is what reveals them.
+  if(passageOpenInFront(here, p.dir)){
+    const fx = p.x + DIR_VEC[p.dir][0];
+    const fy = p.y + DIR_VEC[p.dir][1];
+    const front = cellAt(fx, fy);
+    if(front) front.seen = true;
+  }
+  // 3D rendering still uses the wider 3x3-around-player BFS through open
+  // edges — that pre-loads geometry so rotation/move tweens have rooms
+  // to fly through. This does NOT mark cells as seen.
   const queue = [{cx:p.x, cy:p.y}];
   const visited = new Set([`${p.x},${p.y}`]);
   while(queue.length){
     const {cx,cy} = queue.shift();
     const c = cellAt(cx,cy);
     if(!c) continue;
-    c.seen = true;
     drawRoom(c, cx, cy);
     for(let d=0; d<4; d++){
       if(!passageOpenInFront(c,d)) continue;
       const nx = cx + DIR_VEC[d][0], ny = cy + DIR_VEC[d][1];
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
-      // Restrict to 3x3 around the player (Chebyshev <= 1).
       if(Math.abs(nx - p.x) > 1 || Math.abs(ny - p.y) > 1) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
