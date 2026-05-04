@@ -606,6 +606,16 @@ function initThree(){
   const torch = new THREE.PointLight(0xffaa66, 60, CELL*4, 2);
   torch.name='torch';
   scene.add(torch);
+  // VISIBLE flame marker — a small unlit emissive sphere that follows
+  // torch.position every frame, so you can SEE exactly where the
+  // omnidirectional point light source is in the scene. Equivalent to
+  // a PointLightHelper but uses MeshBasicMaterial so it's pure color
+  // (not affected by lighting itself, always visible).
+  const flameMarkerGeom = new THREE.SphereGeometry(0.18, 10, 10);
+  const flameMarkerMat  = new THREE.MeshBasicMaterial({ color: 0xffcc66 });
+  const flameMarker     = new THREE.Mesh(flameMarkerGeom, flameMarkerMat);
+  flameMarker.name = 'torchFlameMarker';
+  scene.add(flameMarker);
 }
 
 // ---- Texture/sprite loading from sprites/ folder ----
@@ -2223,6 +2233,13 @@ function applyTorchLightingEffects(){
     const cz = state.player.y * CELL + CELL/2;
     torch.decay = 2;
     torch.position.set(cx, WALL_H * 0.55, cz);
+  }
+  // Snap the visible flame sphere to whatever world position the torch
+  // ended up at this frame. Hide it when the torch is fully out.
+  const flameMarker = scene && scene.getObjectByName('torchFlameMarker');
+  if(flameMarker && torch){
+    flameMarker.position.copy(torch.position);
+    flameMarker.visible = (charges > 0);
   }
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
