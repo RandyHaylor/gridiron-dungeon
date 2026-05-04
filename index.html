@@ -2170,10 +2170,13 @@ function applyTorchLightingEffects(){
     // Torch out: even dimmer point light + fuzzier fog gradient than
     // when lit. Fog starts right at the camera so every wall is at
     // least partially shadowed; long ramp out for soft borders.
-    if(torch){ torch.intensity = 0.07; torch.distance = CELL * 1.05; }
+    if(torch){ torch.intensity = 0.06; torch.distance = CELL * 0.9; }
     if(scene && scene.fog){
-      scene.fog.near = 0;                       // starts at camera
-      scene.fog.far  = CELL * 1.6 + centerBias; // fade out across the 3x3
+      // Tighter fog: own room walls visible-but-dim; neighbor cells
+      // are mostly black, only their nearest edges (door/wall silhouette
+      // facing the player) hinted out of the darkness.
+      scene.fog.near = CELL * 0.4;
+      scene.fog.far  = CELL * 1.4 + centerBias;
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
@@ -2190,10 +2193,10 @@ function applyTorchLightingEffects(){
     }
     if(_flicker.spriteDark){
       // Match the no-torch params one-for-one (dimmer + fuzzier).
-      if(torch){ torch.intensity = 0.07; torch.distance = CELL * 1.05; }
+      if(torch){ torch.intensity = 0.06; torch.distance = CELL * 0.9; }
       if(scene && scene.fog){
-        scene.fog.near = 0;
-        scene.fog.far  = CELL * 1.6 + centerBias;
+        scene.fog.near = CELL * 0.4;
+        scene.fog.far  = CELL * 1.4 + centerBias;
       }
     } else {
       // Lit frame.
