@@ -1474,13 +1474,21 @@ function roomAsciiMap(c, dir){
 
 // ---------- torch charges ----------
 function freshTorchCharges(){ return 75 + Math.floor(Math.random()*16); } // 75..90
+const TORCH_RELIGHT_DELAY_MS = 800;
 function extinguishPlayerTorch(){
   state.player.torchCharges = 0;
-  const idx = state.player.inv.indexOf('Torch');
-  if(idx >= 0){
-    state.player.inv.splice(idx, 1);
-    state.player.torchCharges = freshTorchCharges();
-    log("Your torch sputters out — you light a fresh one.");
+  const hasSpare = state.player.inv.indexOf('Torch') >= 0;
+  if(hasSpare){
+    log("Your torch sputters out...");
+    // Brief darkness/fade-out moment before the spare lights up.
+    setTimeout(()=>{
+      const idx = state.player.inv.indexOf('Torch');
+      if(idx < 0) return;
+      state.player.inv.splice(idx, 1);
+      state.player.torchCharges = freshTorchCharges();
+      log("You light a fresh torch.");
+      refreshUI();
+    }, TORCH_RELIGHT_DELAY_MS);
   } else {
     log("Your torch dies. The dark presses in...");
   }
@@ -2120,10 +2128,10 @@ function applyTorchLightingEffects(){
       scene.fog.near = CELL * 1.0 + centerBias; // ~5.6
       scene.fog.far  = CELL * 1.5 + centerBias; // ~7.6
     }
-    if(lh) lh.style.opacity = '0';
+    if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; }
     return;
   }
-  // Lit: standard point-light + fog. Flicker when charges < 5.
+  // Lit: standard point-light + fog. Flicker when charges < 10.
   let intensity = 1.6, distance = CELL * 3;
   if(charges < 10){
     intensity *= 0.55 + Math.random() * 0.55; // 0.55..1.10x of base
@@ -2131,6 +2139,17 @@ function applyTorchLightingEffects(){
       // Brief darker dip — scene gets noticeably dimmer.
       intensity *= 0.35;
     }
+    // Held torch sprite flickers in sympathy. Disable the 600ms fade so
+    // per-frame opacity changes register as a true flicker.
+    if(lh){
+      lh.style.transition = 'none';
+      let op = 0.55 + Math.random() * 0.45;
+      if(Math.random() < 0.18) op *= 0.45;
+      lh.style.opacity = String(op);
+    }
+  } else {
+    // Steady lit: full opacity, smooth fade transition restored.
+    if(lh){ lh.style.transition = ''; lh.style.opacity = '1'; }
   }
   if(torch){ torch.intensity = intensity; torch.distance = distance; }
   if(scene && scene.fog){
