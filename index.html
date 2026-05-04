@@ -2225,16 +2225,24 @@ function applyTorchLightingEffects(){
   // rooms (visible through open passages) get enough light to read
   // their walls. flame marker tracks the same position so the source
   // is visible.
-  if(torch && state.dungeon){
-    const cx = state.player.x * CELL + CELL/2;
-    const cz = state.player.y * CELL + CELL/2;
-    // Stronger falloff: finite range so brightness fades to 0 by the
-    // time it reaches the next room beyond. Combined with decay=2,
-    // current room is comfortably lit, neighbors dim, beyond goes dark.
+  if(torch){
+    // Derive torch position FROM the camera so it tweens smoothly with
+    // the player during move/rotate animations instead of snapping to
+    // state.player.x/y (which updates to the destination cell at move
+    // start). Camera is offset PLAYER_BACK_OFFSET behind the visual
+    // room center along the facing direction; pushing the torch back
+    // toward the room center keeps it tethered ahead of the player.
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    fwd.y = 0; fwd.normalize();
     torch.decay = 2;
-    torch.position.set(cx, WALL_H * 0.55, cz);
+    torch.position.set(
+      camera.position.x + fwd.x * PLAYER_BACK_OFFSET,
+      WALL_H * 0.55,
+      camera.position.z + fwd.z * PLAYER_BACK_OFFSET
+    );
     torch.intensity = 25;
-    torch.distance  = CELL * 2.5; // 10 — fades out before 2 cells away
+    torch.distance  = CELL * 2.5;
   }
   const flameMarker = scene && scene.getObjectByName('torchFlameMarker');
   if(flameMarker){
@@ -2283,7 +2291,8 @@ function applyTorchLightingEffects(){
       }
     } else {
       // Lit frame.
-      if(torch){ torch.intensity = 60; torch.distance = CELL * 4; }
+      if(torch){ torch.intensity = 3.5; torch.distance = CELL * 4; torch.decay = 1; }
+  // (line above also sets steady-lit branch)
       if(ambLight) ambLight.intensity = 0;
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.5 + centerBias;
@@ -2298,7 +2307,7 @@ function applyTorchLightingEffects(){
     lh.style.opacity = '1';
     lh.style.filter = '';
   }
-  if(torch){ torch.intensity = 60; torch.distance = CELL * 4; }
+  if(torch){ torch.intensity = 3.5; torch.distance = CELL * 4; torch.decay = 1; }
   if(scene && scene.fog){
     scene.fog.near = CELL * 0.5 + centerBias;
     scene.fog.far  = CELL * 2.6 + centerBias;
@@ -2702,6 +2711,39 @@ function applyScreenShake(now){
   camera.position.z += (Math.random()*2 - 1) * mag;
 }
 
+// Per-frame manual dim for THREE.Sprite objects (enemies, items, phrase
+// bubbles, damage numbers). Sprites in three.js ignore PointLight, so
+// we tint material.color by distance from the torch using the same
+// intensity / d^decay formula three.js uses for the point light. Past
+// SPRITE_DIM_MAX_DISTANCE units from the torch we force pure black.
+const SPRITE_DIM_MAX_DISTANCE = 8;
+const _dimSpritesTmpVec = new THREE.Vector3();
+function dimSpritesByDistanceFromTorch(){
+  if(!scene) return;
+  const torch = scene.getObjectByName('torch');
+  if(!torch) return;
+  const tp = torch.position;
+  const intensity = torch.intensity || 0;
+  const decay = (typeof torch.decay === 'number') ? torch.decay : 2;
+  scene.traverse(obj => {
+    if(!obj.isSprite) return;
+    if(obj.userData && obj.userData.isTorchFlameMarker) return;
+    obj.getWorldPosition(_dimSpritesTmpVec);
+    const d = Math.max(0.001, _dimSpritesTmpVec.distanceTo(tp));
+    let f;
+    if(d > SPRITE_DIM_MAX_DISTANCE){
+      f = 0;
+    } else {
+      f = intensity / Math.pow(d, decay);
+      if(f > 1) f = 1;
+      if(f < 0) f = 0;
+    }
+    if(obj.material && obj.material.color){
+      obj.material.color.setRGB(f, f, f);
+    }
+  });
+}
+
 function loop(){
   requestAnimationFrame(loop);
   const now = performance.now();
@@ -2719,6 +2761,7 @@ function loop(){
   tickEnemyPhrases(now);
   reapOrphanedPhraseSprites();
   applyTorchLightingEffects();
+  dimSpritesByDistanceFromTorch();
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
   // Smooth ASCII map pan: interpolate continuous cell coords during a
