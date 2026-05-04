@@ -443,11 +443,11 @@ function makeLevel(level){
   }
   placeUniqueFloorItem(swordToSpawn);
   placeUniqueFloorItem(shieldToSpawn);
-  // Guarantee 3 spare torches each level (in addition to whatever the
-  // sprinkle below randomly drops).
-  for(let i=0;i<3;i++) placeUniqueFloorItem('Torch');
-  // Sprinkle other floor items (no swords/shields/guaranteed torches here).
-  const itemsPool = ['Healing Herb','Gold (5gp)','Torch'];
+  // Exactly one spare torch per level. Removed from the random sprinkle
+  // pool below so this remains the only torch.
+  placeUniqueFloorItem('Torch');
+  // Sprinkle other floor items (no swords/shields/torches here).
+  const itemsPool = ['Healing Herb','Gold (5gp)'];
   for(let i=0;i<5;i++){
     const c = cells[ri(H_)][ri(W_)];
     if(c.stairs) continue;
