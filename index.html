@@ -1232,9 +1232,16 @@ function combatAttack(){
         state.stats.enemiesKilled += 1;
         log(`The ${e.name} crumples to the floor!`);
         const cellRef = state.combat.cellRef;
-        // Loot drop: 50/50 gold or herb, dropped into the cell's
-        // items list so the player can Take it.
-        const drop = (Math.random() < 0.5) ? 'Gold (5gp)' : 'Healing Herb';
+        // Loot drop: 50/50 gold or herb. Weak enemies (minLevel 1)
+        // drop 1gp; harder enemies drop 1..state.level gp.
+        let drop;
+        if(Math.random() < 0.5){
+          const isWeak = (e.minLevel || 1) <= 1;
+          const goldAmount = isWeak ? 1 : (1 + Math.floor(Math.random() * Math.max(1, state.level)));
+          drop = `Gold (${goldAmount}gp)`;
+        } else {
+          drop = 'Healing Herb';
+        }
         cellRef.items.push(drop);
         log(`It drops ${drop}.`);
         state.combat = null;
