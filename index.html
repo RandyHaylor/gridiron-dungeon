@@ -2245,10 +2245,12 @@ function applyTorchLightingEffects(){
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
   if(charges <= 0){
-    // Torch out: weak point light (just enough to see the cell), darker
-    // ambient, vignette on. Light remains anchored at cell center so
-    // every wall's brightness profile is symmetric around its midpoint.
-    if(torch){ torch.intensity = 8; torch.distance = CELL * 1.6; }
+    // Torch out: range = 4 (= CELL, one room wide), gentle 0.2 decay.
+    if(torch){
+      torch.intensity = 8;
+      torch.distance  = 4;
+      torch.decay     = 0.2;
+    }
     if(ambLight) ambLight.intensity = 0;
     if(scene && scene.fog){
       scene.fog.near = CELL * 0.95;
