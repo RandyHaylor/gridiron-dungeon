@@ -1189,6 +1189,12 @@ function pickUpItem(idx){
     } else {
       log(`You strap on ${item} (dmg-reduction ${SHIELD_STATS[item]}).`);
     }
+  } else if(item === 'Torch' && state.player.torchCharges <= 0){
+    // Auto-light a freshly picked-up torch when the current one is out
+    // (instead of adding to inventory).
+    state.player.torchCharges = freshTorchCharges();
+    playSfx('herb_collect');
+    log("You light the torch and the dark recoils.");
   } else {
     state.player.inv.push(item);
     if(item === 'Healing Herb' || item === 'Torch') playSfx('herb_collect');
