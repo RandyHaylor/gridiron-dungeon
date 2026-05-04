@@ -2247,7 +2247,7 @@ function applyTorchLightingEffects(){
   if(charges <= 0){
     // Torch out: range = 4 (= CELL, one room wide), gentle 0.2 decay.
     if(torch){
-      torch.intensity = 8;
+      torch.intensity = 2;     // dimmer overall
       torch.distance  = 4;
       torch.decay     = 0.2;
     }
