@@ -506,7 +506,7 @@ const state = {
             inv:['Healing Herb','Healing Herb'],
             weapon: { name:'Fists', atk:2 },
             shield: { name:'None',  dr:0 },
-            torchCharges: 75 + Math.floor(Math.random()*16) },
+            torchCharges: 0 },
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
@@ -551,6 +551,12 @@ function newLevel(level){
   state.combat = null;
   state.combatBusy = false;
   if(state.stats) state.stats.visitedKeys.add(`${level}:${d.px}:${d.py}`);
+  // On level 1, the player starts torchless — guarantee a torch lying
+  // at their feet so they can immediately light up.
+  if(level === 1){
+    const startCell = d.cells[d.py][d.px];
+    if(startCell.items.indexOf('Torch') < 0) startCell.items.push('Torch');
+  }
   buildScene();
   log(`-- Level ${level} --`);
   refreshUI();
@@ -693,18 +699,10 @@ function renderVisibleRooms(){
   // straight hallway opens up, plus side-rooms reachable by going around
   // a corner one step. Pre-rendering the wider set means rotation /
   // forward animations have geometry already in place (no black flash).
-  // Mark the player's own cell as seen (you're physically in it).
-  here.seen = true;
-  // Mark the cell directly in front as seen ONLY if there's an open
-  // passage or open door between you and it (you can see straight ahead).
-  // Side and diagonal cells are NOT auto-marked even if reachable —
-  // walking into them is what reveals them.
-  if(passageOpenInFront(here, p.dir)){
-    const fx = p.x + DIR_VEC[p.dir][0];
-    const fy = p.y + DIR_VEC[p.dir][1];
-    const front = cellAt(fx, fy);
-    if(front) front.seen = true;
-  }
+  // (Seen-marking is no longer done inside renderVisibleRooms — it runs
+  // only on explicit player look events: enterCell, rotate, toggleDoor.
+  // Otherwise re-renders triggered by combat, lighting changes, or loot
+  // drops would errantly mark in-front cells the player never looked at.)
   // 3D rendering still uses the wider 3x3-around-player BFS through open
   // edges — that pre-loads geometry so rotation/move tweens have rooms
   // to fly through. This does NOT mark cells as seen.
@@ -721,10 +719,10 @@ function renderVisibleRooms(){
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
       // Render radius depends on whether the player has a lit torch.
-      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 1 (3x3) so the
-      // tight torch-out fog has geometry to fade across, producing
-      // soft fuzzy black borders that pan with the camera as you move.
-      const radius = (state.player.torchCharges > 0) ? 2 : 1;
+      // Lit: Chebyshev <= 2 (5x5). Out: only the player's own cell —
+      // adjacent rooms aren't rendered at all so rotating in the dark
+      // can't reveal enemies/items in side cells.
+      const radius = (state.player.torchCharges > 0) ? 2 : 0;
       if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
@@ -978,6 +976,24 @@ function drawStairsMarker(ox, oz){
 }
 
 // -------- gameplay actions --------
+// Mark the player's own cell as seen (you're physically in it), and
+// mark the cell DIRECTLY in front as seen if there's an open passage
+// or open door AND the torch is lit (you can actually see through it).
+// This is the only place that grants ASCII-map visibility.
+function markPlayerLookSeen(){
+  const p = state.player;
+  const here = cellAt(p.x, p.y);
+  if(!here) return;
+  here.seen = true;
+  if(state.player.torchCharges <= 0) return; // can't see in the dark
+  if(passageOpenInFront(here, p.dir)){
+    const fx = p.x + DIR_VEC[p.dir][0];
+    const fy = p.y + DIR_VEC[p.dir][1];
+    const front = cellAt(fx, fy);
+    if(front) front.seen = true;
+  }
+}
+
 function tryMoveForward(){
   if(state.anim){ state.pendingAction = tryMoveForward; return; }
   if(state.combat){ log("You can't run blindly — you're in combat. Use Run."); return; }
@@ -1011,6 +1027,7 @@ function tryMoveForward(){
 function enterCell(){
   const c = cellAt(state.player.x, state.player.y);
   state.stats.visitedKeys.add(`${state.level}:${state.player.x}:${state.player.y}`);
+  markPlayerLookSeen();
   if(c.enemy){
     state.combat = { enemy: c.enemy, cellRef: c };
     log(`A ${c.enemy.name} blocks the way! (HP ${c.enemy.hp}/${c.enemy.hpMax})`);
@@ -1080,6 +1097,7 @@ function rotate(delta){
   const oldDir = p.dir;
   const fromYaw = yawForDir(oldDir);
   p.dir = ((p.dir + delta) % 4 + 4) % 4;
+  markPlayerLookSeen();
   const toYaw = fromYaw + shortestYawDelta(fromYaw, yawForDir(p.dir));
   // Rotate the camera-offset vector AROUND the cell center over time, so
   // the camera traces an arc (constant radius from center), not a chord
@@ -1111,6 +1129,7 @@ function toggleDoor(){
   if(other) other.walls[(p.dir+2)%4].open = w.open;
   playSfx('door');
   log(w.open ? "You open the door. It groans on rusty hinges." : "You shut the door.");
+  markPlayerLookSeen();
   renderVisibleRooms();
   refreshUI();
 }
@@ -2173,13 +2192,13 @@ function applyTorchLightingEffects(){
     // Torch out: even dimmer point light + fuzzier fog gradient than
     // when lit. Fog starts right at the camera so every wall is at
     // least partially shadowed; long ramp out for soft borders.
-    if(torch){ torch.intensity = 0.05; torch.distance = CELL * 0.75; }
+    if(torch){ torch.intensity = 0.04; torch.distance = CELL * 0.6; }
     if(scene && scene.fog){
       // Tighter fog: own room walls visible-but-dim; neighbor cells
       // are mostly black, only their nearest edges (door/wall silhouette
       // facing the player) hinted out of the darkness.
-      scene.fog.near = CELL * 0.6;
-      scene.fog.far  = CELL * 1.0 + centerBias;
+      scene.fog.near = CELL * 0.3;
+      scene.fog.far  = CELL * 0.85 + centerBias;
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
@@ -2196,7 +2215,7 @@ function applyTorchLightingEffects(){
     }
     if(_flicker.spriteDark){
       // Match the no-torch params one-for-one (dimmer + fuzzier).
-      if(torch){ torch.intensity = 0.05; torch.distance = CELL * 0.75; }
+      if(torch){ torch.intensity = 0.04; torch.distance = CELL * 0.6; }
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.4;
         scene.fog.far  = CELL * 1.4 + centerBias;
