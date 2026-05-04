@@ -2223,23 +2223,24 @@ function applyTorchLightingEffects(){
   // (The camera rides ~PLAYER_BACK_OFFSET behind center; pinning the
   // light at center means the wall illumination doesn't slide around
   // when the camera tweens or arcs through a rotation.)
-  // DIAGNOSTIC: place the light DIRECTLY ABOVE the camera at y=10.
-  // If position writes are taking effect, the floor below the player
-  // should be brightest, with even horizontal falloff. If user still
-  // sees the same forward-bias — the position writes are being
-  // overridden somewhere else.
-  if(torch){
+  // Position the omnidirectional point light at the player's cell
+  // center, at eye height. Intensity bumped high enough that adjacent
+  // rooms (visible through open passages) get enough light to read
+  // their walls. flame marker tracks the same position so the source
+  // is visible.
+  if(torch && state.dungeon){
+    const cx = state.player.x * CELL + CELL/2;
+    const cz = state.player.y * CELL + CELL/2;
     torch.decay = 2;
-    torch.position.set(camera.position.x, 10, camera.position.z);
-    torch.intensity = 200;
-    torch.distance  = 0; // infinite range, decay-only falloff
+    torch.position.set(cx, WALL_H * 0.55, cz);
+    torch.intensity = 600;
+    torch.distance  = 0; // infinite range, only decay drives falloff
   }
   const flameMarker = scene && scene.getObjectByName('torchFlameMarker');
   if(flameMarker && torch){
     flameMarker.position.copy(torch.position);
-    flameMarker.visible = true; // force visible regardless of charges
-    // Make it big and easy to see for the diagnostic.
-    flameMarker.scale.setScalar(2.0);
+    flameMarker.visible = true;
+    flameMarker.scale.setScalar(1.0);
   }
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
   const now = performance.now();
