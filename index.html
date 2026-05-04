@@ -1313,7 +1313,7 @@ function renderInventoryOverlay(){
     row.appendChild(label);
     if(CONSUMABLES.hasOwnProperty(name)){
       const useBtn = document.createElement('button');
-      useBtn.textContent = 'Use';
+      useBtn.textContent = (name === 'Healing Herb') ? 'Use Herb (H)' : 'Use';
       useBtn.onclick = ()=> useConsumableByName(name);
       row.appendChild(useBtn);
     }
@@ -1394,6 +1394,10 @@ function dispatchKeyAction(key){
   }
   else if(key==='i'||key==='I'){
     toggleInventoryOverlay();
+  }
+  else if(key==='h'||key==='H'){
+    if(state.player.inv.includes('Healing Herb')) useConsumableByName('Healing Herb');
+    else log("No Healing Herb to use.");
   }
 }
 
