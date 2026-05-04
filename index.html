@@ -1474,7 +1474,7 @@ function roomAsciiMap(c, dir){
 
 // ---------- torch charges ----------
 function freshTorchCharges(){ return 75 + Math.floor(Math.random()*16); } // 75..90
-const TORCH_RELIGHT_DELAY_MS = 800;
+const TORCH_RELIGHT_DELAY_MS = 1200; // brief darkness before the new torch lights
 function extinguishPlayerTorch(){
   state.player.torchCharges = 0;
   const hasSpare = state.player.inv.indexOf('Torch') >= 0;
@@ -2108,6 +2108,21 @@ function tickAnimation(now){
 
 // Per-frame ambient bob for enemies, the stairs-down arrow, and its label.
 // Skips an enemy that's currently driven by the lunge animation.
+// Time-gated flicker state: re-roll multipliers every 80..200ms so the
+// flicker reads as flame-paced (slower than 60fps) and stronger.
+const _flicker = { nextRollTs: 0, lightMul: 1, spriteOp: 1 };
+function _rollFlickerValues(now){
+  // Sprite swings harder than the ambient light: the held flame is the
+  // visual focus; ambient should pulse less.
+  let sOp = 0.30 + Math.random() * 0.70;        // 0.30..1.00
+  if(Math.random() < 0.30) sOp *= 0.30;          // chance of a deep dip
+  let lMul = 0.70 + Math.random() * 0.40;       // 0.70..1.10
+  if(Math.random() < 0.18) lMul *= 0.50;
+  _flicker.spriteOp = sOp;
+  _flicker.lightMul = lMul;
+  _flicker.nextRollTs = now + 90 + Math.random() * 180; // 90..270ms hold
+}
+
 // Adjust the torch point light + scene fog + left-hand HUD based on
 // the player's remaining torch charges. Also flickers when low.
 function applyTorchLightingEffects(){
@@ -2119,14 +2134,15 @@ function applyTorchLightingEffects(){
   // to all near/far values so the fog gradient reads as anchored to
   // the room center instead of the player's eyepoint.
   const centerBias = PLAYER_BACK_OFFSET; // ~1.6 world units
+  const now = performance.now();
   if(charges <= 0){
-    // Torch out: dim point light. Fog pushed beyond the current room's
-    // far wall (which sits ~3.6 units from camera) so the room walls
-    // are clearly visible; everything past the room is void anyway.
-    if(torch){ torch.intensity = 0.35; torch.distance = CELL * 1.6; }
+    // Torch out: distinctly darker than 'low'. Fog pushed beyond the
+    // current room's far wall so the room walls are clearly visible;
+    // everything past is void anyway.
+    if(torch){ torch.intensity = 0.20; torch.distance = CELL * 1.4; }
     if(scene && scene.fog){
-      scene.fog.near = CELL * 1.0 + centerBias; // ~5.6
-      scene.fog.far  = CELL * 1.5 + centerBias; // ~7.6
+      scene.fog.near = CELL * 0.9 + centerBias;
+      scene.fog.far  = CELL * 1.4 + centerBias;
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; }
     return;
@@ -2134,18 +2150,11 @@ function applyTorchLightingEffects(){
   // Lit: standard point-light + fog. Flicker when charges < 10.
   let intensity = 1.6, distance = CELL * 3;
   if(charges < 10){
-    intensity *= 0.55 + Math.random() * 0.55; // 0.55..1.10x of base
-    if(Math.random() < 0.18){
-      // Brief darker dip — scene gets noticeably dimmer.
-      intensity *= 0.35;
-    }
-    // Held torch sprite flickers in sympathy. Disable the 600ms fade so
-    // per-frame opacity changes register as a true flicker.
+    if(now >= _flicker.nextRollTs) _rollFlickerValues(now);
+    intensity *= _flicker.lightMul;
     if(lh){
       lh.style.transition = 'none';
-      let op = 0.55 + Math.random() * 0.45;
-      if(Math.random() < 0.18) op *= 0.45;
-      lh.style.opacity = String(op);
+      lh.style.opacity = String(_flicker.spriteOp);
     }
   } else {
     // Steady lit: full opacity, smooth fade transition restored.
