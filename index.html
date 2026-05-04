@@ -999,10 +999,23 @@ function combatAttack(){
       if(e.hp <= 0){
         state.stats.enemiesKilled += 1;
         log(`The ${e.name} crumples to the floor!`);
-        state.combat.cellRef.enemy = null;
+        const cellRef = state.combat.cellRef;
         state.combat = null;
         state.combatBusy = false;
-        renderVisibleRooms();
+        const dyingObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
+        if(dyingObj){
+          // Defer cell.enemy clear and re-render until the blink/fade
+          // finishes, otherwise renderVisibleRooms would yank the sprite
+          // out before the animation plays.
+          playEnemyDeathAnimation(dyingObj, ()=>{
+            cellRef.enemy = null;
+            renderVisibleRooms();
+            refreshUI();
+          });
+        } else {
+          cellRef.enemy = null;
+          renderVisibleRooms();
+        }
         refreshUI();
         return;
       }
@@ -1501,6 +1514,7 @@ function bobEnemiesInPlace(now){
     if(!u || typeof u.baseY !== 'number') return;
     if(u.isEnemy){
       if(obj === lungeEnemy) return;
+      if(u.dying) return;
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * ENEMY_BOB_AMPLITUDE;
     } else if(u.isStairsArrow || u.isStairsLabel){
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * 0.18;
@@ -1536,6 +1550,39 @@ function startEnemyLungeAnimation(enemyObj, onPeak, onDone){
     onPeak: onPeak || null,
     onDone: onDone || null
   };
+}
+
+// Death animation for an enemy sprite: blink red/black several times,
+// then fade alpha to 0. Calls onDone after the fade completes so the
+// caller can finally clear the cell.enemy reference and re-render.
+const ENEMY_DEATH_BLINK_MS = 600;
+const ENEMY_DEATH_FADE_MS  = 350;
+const ENEMY_DEATH_BLINK_CYCLES = 6; // total color toggles across blink window
+function playEnemyDeathAnimation(enemyObj, onDone){
+  const mat = enemyObj && enemyObj.material;
+  if(!mat || !mat.color){ if(onDone) onDone(); return; }
+  enemyObj.userData.dying = true;
+  const origColor = mat.color.getHex();
+  mat.transparent = true;
+  const startTs = performance.now();
+  const total = ENEMY_DEATH_BLINK_MS + ENEMY_DEATH_FADE_MS;
+  const tick = ()=>{
+    const elapsed = performance.now() - startTs;
+    if(elapsed < ENEMY_DEATH_BLINK_MS){
+      const phase = Math.floor((elapsed / ENEMY_DEATH_BLINK_MS) * ENEMY_DEATH_BLINK_CYCLES) % 2;
+      mat.color.setHex(phase === 0 ? 0xff3333 : 0x000000);
+      mat.opacity = 1;
+      requestAnimationFrame(tick);
+    } else if(elapsed < total){
+      mat.color.setHex(origColor);
+      mat.opacity = 1 - (elapsed - ENEMY_DEATH_BLINK_MS) / ENEMY_DEATH_FADE_MS;
+      requestAnimationFrame(tick);
+    } else {
+      mat.opacity = 0;
+      if(onDone) onDone();
+    }
+  };
+  tick();
 }
 
 // Briefly tint an enemy sprite red to indicate it took damage. Restores
