@@ -721,8 +721,10 @@ function renderVisibleRooms(){
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
       // Render radius depends on whether the player has a lit torch.
-      // Lit: Chebyshev <= 2 (5x5). Out: only the player's own cell.
-      const radius = (state.player.torchCharges > 0) ? 2 : 0;
+      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 1 (3x3) so the
+      // tight torch-out fog has geometry to fade across, producing
+      // soft fuzzy black borders that pan with the camera as you move.
+      const radius = (state.player.torchCharges > 0) ? 2 : 1;
       if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
@@ -2173,7 +2175,7 @@ function applyTorchLightingEffects(){
     if(torch){ torch.intensity = 0.07; torch.distance = CELL * 1.05; }
     if(scene && scene.fog){
       scene.fog.near = 0;                       // starts at camera
-      scene.fog.far  = CELL * 1.9 + centerBias; // long fade for fuzz
+      scene.fog.far  = CELL * 1.6 + centerBias; // fade out across the 3x3
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
@@ -2193,7 +2195,7 @@ function applyTorchLightingEffects(){
       if(torch){ torch.intensity = 0.07; torch.distance = CELL * 1.05; }
       if(scene && scene.fog){
         scene.fog.near = 0;
-        scene.fog.far  = CELL * 1.9 + centerBias;
+        scene.fog.far  = CELL * 1.6 + centerBias;
       }
     } else {
       // Lit frame.
