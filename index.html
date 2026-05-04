@@ -96,6 +96,18 @@
   .dpad { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; }
   .dpad button { font-size:22px; padding:8px 0; line-height:1;
                  min-height:38px; }
+  /* Descend button glow + pulse when the player is standing on stairs. */
+  .dpad button.available {
+    background:#063;
+    color:#aaffaa;
+    border-color:#0f6;
+    box-shadow: 0 0 6px #0f4 inset, 0 0 6px #0f4;
+    animation: descendPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes descendPulse {
+    0%,100% { box-shadow: 0 0 6px #0f4 inset, 0 0 5px #0f4; }
+    50%     { box-shadow: 0 0 6px #0f4 inset, 0 0 14px #0f6; }
+  }
   #ui h3 { margin:0 0 4px 0; font-size:16px; color:#9f9; letter-spacing:1px; }
   #log { font-size:12px; line-height:1.2; overflow:hidden; max-height:60px; }
   #log div { opacity:.95; }
@@ -665,6 +677,26 @@ function drawStairsMarker(ox, oz){
   stairs.rotation.x = -Math.PI/2;
   stairs.position.set(ox + CELL/2, 0.02, oz + CELL/2);
   dungeonGroup.add(stairs);
+
+  // Bobbing green down-arrow cone hovering over the hatch.
+  const arrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.32, 0.55, 6),
+    new THREE.MeshStandardMaterial({ color:0x33ff33, emissive:0x115511 })
+  );
+  arrow.rotation.x = Math.PI; // point down
+  arrow.position.set(ox + CELL/2, 1.0, oz + CELL/2);
+  arrow.userData.isStairsArrow = true;
+  arrow.userData.baseY = arrow.position.y;
+  arrow.userData.bobPhase = Math.random() * Math.PI * 2;
+  dungeonGroup.add(arrow);
+
+  // Floating 'Descend' label above the arrow.
+  const label = makeTextSprite('Descend');
+  label.position.set(ox + CELL/2, 1.55, oz + CELL/2);
+  label.userData.isStairsLabel = true;
+  label.userData.baseY = label.position.y;
+  label.userData.bobPhase = arrow.userData.bobPhase;
+  dungeonGroup.add(label);
 }
 
 // -------- gameplay actions --------
@@ -1111,7 +1143,9 @@ function refreshUI(){
   document.getElementById('btnLeft').disabled = !!state.combat;
   document.getElementById('btnRight').disabled = !!state.combat;
   document.getElementById('btnDoor').disabled = !!state.combat || (c.walls[p.dir].type!=='door');
-  document.getElementById('btnStairs').disabled = !c.stairs || !!state.combat;
+  const stairsBtn = document.getElementById('btnStairs');
+  stairsBtn.disabled = !c.stairs || !!state.combat;
+  stairsBtn.classList.toggle('available', !!c.stairs && !state.combat);
 }
 
 // -------- inventory overlay --------
@@ -1265,14 +1299,17 @@ function tickAnimation(now){
   }
 }
 
-// Per-frame ambient bob for enemy sprites (sin curve in world units).
+// Per-frame ambient bob for enemies, the stairs-down arrow, and its label.
 function bobEnemiesInPlace(now){
   if(!dungeonGroup) return;
   const w = (Math.PI * 2) / ENEMY_BOB_PERIOD_MS;
   dungeonGroup.children.forEach(obj=>{
     const u = obj.userData;
-    if(u && u.isEnemy && typeof u.baseY === 'number'){
+    if(!u || typeof u.baseY !== 'number') return;
+    if(u.isEnemy){
       obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * ENEMY_BOB_AMPLITUDE;
+    } else if(u.isStairsArrow || u.isStairsLabel){
+      obj.position.y = u.baseY + Math.sin(now*w + u.bobPhase) * 0.18;
     }
   });
 }
