@@ -1803,9 +1803,9 @@ function tickEnemyPhrases(now){
       const display = (phrase.kind === 'movement') ? `*${phrase.text}*` : phrase.text;
       const sp = makeTextSprite(display, { borderColor: '#f44', textColor: '#ffd9d9' });
       sp.position.set(obj.position.x, obj.position.y + 1.25, obj.position.z);
-      sp.material.depthTest = false;
+      // depthTest stays true so walls / doors occlude the bubble like a
+      // real object in the world.
       sp.material.opacity = 1;
-      sp.renderOrder = 1000;
       scene.add(sp);
       enemy.currentPhraseSprite = sp;
       const showMs = PHRASE_SHOW_MIN_MS + Math.random()*(PHRASE_SHOW_MAX_MS-PHRASE_SHOW_MIN_MS);
