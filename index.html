@@ -719,6 +719,17 @@ function renderVisibleRooms(){
   // to fly through. This does NOT mark cells as seen.
   const queue = [{cx:p.x, cy:p.y}];
   const visited = new Set([`${p.x},${p.y}`]);
+  // While a move animation is active, also include the source cell so
+  // the camera has geometry under itself the entire way across — no
+  // unrendered "void" between cells.
+  if(state.anim && state.anim.kind === 'move' &&
+     typeof state.anim.fromCellX === 'number'){
+    const fk = `${state.anim.fromCellX},${state.anim.fromCellY}`;
+    if(!visited.has(fk)){
+      visited.add(fk);
+      queue.push({cx: state.anim.fromCellX, cy: state.anim.fromCellY});
+    }
+  }
   while(queue.length){
     const {cx,cy} = queue.shift();
     const c = cellAt(cx,cy);
@@ -2208,8 +2219,11 @@ function applyTorchLightingEffects(){
     if(torch){
       const fwdX = -Math.sin(camera.rotation.y);
       const fwdZ = -Math.cos(camera.rotation.y);
-      torch.intensity = 1.2;
-      torch.distance  = CELL * 0.55;
+      // decay=1 (linear-ish) instead of three.js default=2 (inverse-square)
+      // so the light actually reaches the walls at distance 2 from center.
+      torch.decay     = 1;
+      torch.intensity = 1.0;
+      torch.distance  = CELL * 1.5; // 6 — walls at 2 get ~67% intensity
       torch.position.set(
         camera.position.x + fwdX * PLAYER_BACK_OFFSET,
         WALL_H * 0.55,
