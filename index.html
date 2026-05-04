@@ -1037,12 +1037,20 @@ function combatAttack(){
         state.combatBusy = false;
         const dyingObj = findEnemySpriteForCell(cellRef.x, cellRef.y);
         if(dyingObj){
-          // Defer cell.enemy clear and re-render until the blink/fade
-          // finishes, otherwise renderVisibleRooms would yank the sprite
-          // out before the animation plays.
+          // Detach the dying mesh from dungeonGroup and re-parent it to
+          // the scene root, so a renderVisibleRooms triggered by player
+          // movement (or any re-render) won't yank it out and won't
+          // re-create a fresh full-color enemy in its place. Clear
+          // cell.enemy immediately so future renders skip the cell.
+          dungeonGroup.remove(dyingObj);
+          scene.add(dyingObj);
+          cellRef.enemy = null;
           playEnemyDeathAnimation(dyingObj, ()=>{
-            cellRef.enemy = null;
-            renderVisibleRooms();
+            scene.remove(dyingObj);
+            if(dyingObj.material){
+              if(dyingObj.material.map) dyingObj.material.map.dispose();
+              dyingObj.material.dispose();
+            }
             refreshUI();
           });
         } else {
