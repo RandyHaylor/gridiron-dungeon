@@ -719,10 +719,12 @@ function renderVisibleRooms(){
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
       // Render radius depends on whether the player has a lit torch.
-      // Lit: Chebyshev <= 2 (5x5). Out: only the player's own cell —
-      // adjacent rooms aren't rendered at all so rotating in the dark
-      // can't reveal enemies/items in side cells.
-      const radius = (state.player.torchCharges > 0) ? 2 : 0;
+      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 1 (3x3) so geometry
+      // exists past the player's own walls for fog to fade across,
+      // producing a soft fuzzy black edge that pans with the camera.
+      // Side-cell content (enemies/items) sits past fog.far and stays
+      // fully black, so rotating in the dark still doesn't reveal it.
+      const radius = (state.player.torchCharges > 0) ? 2 : 1;
       if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
@@ -2192,13 +2194,13 @@ function applyTorchLightingEffects(){
     // Torch out: even dimmer point light + fuzzier fog gradient than
     // when lit. Fog starts right at the camera so every wall is at
     // least partially shadowed; long ramp out for soft borders.
-    if(torch){ torch.intensity = 0.04; torch.distance = CELL * 0.6; }
+    if(torch){ torch.intensity = 0.08; torch.distance = CELL * 0.9; }
     if(scene && scene.fog){
       // Tighter fog: own room walls visible-but-dim; neighbor cells
       // are mostly black, only their nearest edges (door/wall silhouette
       // facing the player) hinted out of the darkness.
-      scene.fog.near = CELL * 0.3;
-      scene.fog.far  = CELL * 0.85 + centerBias;
+      scene.fog.near = CELL * 0.3 + centerBias;
+      scene.fog.far  = CELL * 0.65 + centerBias;
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
@@ -2215,7 +2217,7 @@ function applyTorchLightingEffects(){
     }
     if(_flicker.spriteDark){
       // Match the no-torch params one-for-one (dimmer + fuzzier).
-      if(torch){ torch.intensity = 0.04; torch.distance = CELL * 0.6; }
+      if(torch){ torch.intensity = 0.08; torch.distance = CELL * 0.9; }
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.4;
         scene.fog.far  = CELL * 1.4 + centerBias;
