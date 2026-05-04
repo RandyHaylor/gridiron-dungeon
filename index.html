@@ -307,12 +307,6 @@
       <div class="big">grid-A-Iron</div>
       <div class="sub">DUNGEON</div>
     </div>
-    <div class="vol-row">Music
-      <input type="range" id="musicVolSlider" min="0" max="1" step="0.01" value="0.25" />
-    </div>
-    <div class="vol-row">SFX
-      <input type="range" id="sfxVolSlider"   min="0" max="1" step="0.01" value="0.35" />
-    </div>
     <button id="btnStartGame">Enter Dungeon</button>
   </div>
   <div id="vendorOverlay" hidden>
@@ -1954,23 +1948,13 @@ function dismissStartScreen(){
 }
 document.getElementById('btnStartGame').onclick = dismissStartScreen;
 function syncMusicSlidersToValue(v){
-  const a = document.getElementById('musicVolSlider');
   const b = document.getElementById('settingsMusicVolSlider');
-  if(a) a.value = String(v);
   if(b) b.value = String(v);
 }
 function syncSfxSlidersToValue(v){
-  const a = document.getElementById('sfxVolSlider');
   const b = document.getElementById('settingsSfxVolSlider');
-  if(a) a.value = String(v);
   if(b) b.value = String(v);
 }
-document.getElementById('musicVolSlider').oninput = (e)=>{
-  const v = parseFloat(e.target.value); setMusicVolume(v); syncMusicSlidersToValue(v);
-};
-document.getElementById('sfxVolSlider').oninput   = (e)=>{
-  const v = parseFloat(e.target.value); setSfxVolume(v); syncSfxSlidersToValue(v);
-};
 document.getElementById('settingsMusicVolSlider').oninput = (e)=>{
   const v = parseFloat(e.target.value); setMusicVolume(v); syncMusicSlidersToValue(v);
 };
