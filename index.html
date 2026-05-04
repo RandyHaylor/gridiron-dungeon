@@ -1298,6 +1298,9 @@ function combatAttack(){
           dungeonGroup.remove(dyingObj);
           scene.add(dyingObj);
           cellRef.enemy = null;
+          // Re-render now so the just-dropped loot is drawn into the
+          // cell immediately (was waiting until the player's next move).
+          renderVisibleRooms();
           playEnemyDeathAnimation(dyingObj, ()=>{
             scene.remove(dyingObj);
             if(dyingObj.material){
@@ -2170,13 +2173,13 @@ function applyTorchLightingEffects(){
     // Torch out: even dimmer point light + fuzzier fog gradient than
     // when lit. Fog starts right at the camera so every wall is at
     // least partially shadowed; long ramp out for soft borders.
-    if(torch){ torch.intensity = 0.06; torch.distance = CELL * 0.9; }
+    if(torch){ torch.intensity = 0.05; torch.distance = CELL * 0.75; }
     if(scene && scene.fog){
       // Tighter fog: own room walls visible-but-dim; neighbor cells
       // are mostly black, only their nearest edges (door/wall silhouette
       // facing the player) hinted out of the darkness.
-      scene.fog.near = CELL * 0.4;
-      scene.fog.far  = CELL * 1.4 + centerBias;
+      scene.fog.near = CELL * 0.6;
+      scene.fog.far  = CELL * 1.0 + centerBias;
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
@@ -2193,7 +2196,7 @@ function applyTorchLightingEffects(){
     }
     if(_flicker.spriteDark){
       // Match the no-torch params one-for-one (dimmer + fuzzier).
-      if(torch){ torch.intensity = 0.06; torch.distance = CELL * 0.9; }
+      if(torch){ torch.intensity = 0.05; torch.distance = CELL * 0.75; }
       if(scene && scene.fog){
         scene.fog.near = CELL * 0.4;
         scene.fog.far  = CELL * 1.4 + centerBias;
