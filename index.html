@@ -2161,10 +2161,11 @@ function applyTorchLightingEffects(){
     // Torch out: distinctly darker than 'low'. Fog pushed beyond the
     // current room's far wall so the room walls are clearly visible;
     // everything past is void anyway.
-    if(torch){ torch.intensity = 0.20; torch.distance = CELL * 1.4; }
+    // Torch out: dimmer, brought in a hair, fuzzier fog gradient.
+    if(torch){ torch.intensity = 0.12; torch.distance = CELL * 1.15; }
     if(scene && scene.fog){
-      scene.fog.near = CELL * 0.9 + centerBias;
-      scene.fog.far  = CELL * 1.4 + centerBias;
+      scene.fog.near = CELL * 0.5 + centerBias; // starts near the room edge
+      scene.fog.far  = CELL * 1.6 + centerBias; // long fade-out for fuzz
     }
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
