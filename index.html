@@ -35,7 +35,8 @@
   .hand { position:absolute; bottom:-92px; width:192px; height:192px;
           pointer-events:none; image-rendering:pixelated; z-index:5; }
   .hand img { width:100%; height:100%; image-rendering:pixelated; display:block; }
-  .hand.left  { left:0;    transform: rotate(-15deg); }
+  .hand.left  { left:0;    transform: rotate(-15deg);
+                 transition: opacity 600ms ease-out; }
   .hand.right { right:0;   transform: rotate(20deg); }
   .hand[hidden]{ display:none; }
   /* Damage flash: full red veil over the 3D viewport, fades out fast. */
@@ -486,7 +487,8 @@ const state = {
   player: { x:0, y:0, dir:N, hp:20, hpMax:20, gold:0,
             inv:['Healing Herb','Healing Herb'],
             weapon: { name:'Fists', atk:1 },
-            shield: { name:'None',  dr:0 } },
+            shield: { name:'None',  dr:0 },
+            torchCharges: 20 + Math.floor(Math.random()*11) },
   dungeon: null,
   combat: null, // {enemy, ref to cell}
   awaitInput: false,
@@ -700,10 +702,10 @@ function renderVisibleRooms(){
       const nx = cx + DIR_VEC[d][0], ny = cy + DIR_VEC[d][1];
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
-      // Render up to Chebyshev <= 2 (5x5 around player) so the cells you're
-      // facing don't suddenly drop out when you take a single step backward;
-      // the outer ring stays under heavy fog and visually dissolves.
-      if(Math.abs(nx - p.x) > 2 || Math.abs(ny - p.y) > 2) continue;
+      // Render radius depends on whether the player has a lit torch.
+      // Lit: Chebyshev <= 2 (5x5). Out: only the player's own cell.
+      const radius = (state.player.torchCharges > 0) ? 2 : 0;
+      if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
     }
@@ -977,7 +979,11 @@ function tryMoveForward(){
     fromPos, toPos, fromYaw: yawForDir(p.dir), toYaw: yawForDir(p.dir),
     fromCellX: p.x - DIR_VEC[p.dir][0], fromCellY: p.y - DIR_VEC[p.dir][1],
     toCellX:   p.x,                     toCellY:   p.y,
-    onDone: ()=>{ log(`You step forward into a new room.`); enterCell(); }
+    onDone: ()=>{
+      consumePlayerTorchStep();
+      log(`You step forward into a new room.`);
+      enterCell();
+    }
   };
   playSfx('footstep');
   renderVisibleRooms();
@@ -1022,6 +1028,7 @@ function tryMoveBackward(){
     fromCellX: p.x - DIR_VEC[back][0], fromCellY: p.y - DIR_VEC[back][1],
     toCellX:   p.x,                    toCellY:   p.y,
     onDone: ()=>{
+      consumePlayerTorchStep();
       log("You step backward.");
       const here2 = cellAt(p.x, p.y);
       if(here2.enemy){
@@ -1447,6 +1454,27 @@ function roomAsciiMap(c, dir){
   return lines.join('\n');
 }
 
+// ---------- torch charges ----------
+function freshTorchCharges(){ return 20 + Math.floor(Math.random()*11); } // 20..30
+function extinguishPlayerTorch(){
+  state.player.torchCharges = 0;
+  const idx = state.player.inv.indexOf('Torch');
+  if(idx >= 0){
+    state.player.inv.splice(idx, 1);
+    state.player.torchCharges = freshTorchCharges();
+    log("Your torch sputters out — you light a fresh one.");
+  } else {
+    log("Your torch dies. The dark presses in...");
+  }
+}
+function consumePlayerTorchStep(){
+  if(state.player.torchCharges <= 0) return;
+  state.player.torchCharges -= 1;
+  if(state.player.torchCharges <= 0){
+    extinguishPlayerTorch();
+  }
+}
+
 function updateRightHandSprite(){
   const rh = document.getElementById('rightHand');
   if(!rh) return;
@@ -1537,10 +1565,14 @@ function refreshUI(){
   // status / combat panel
   // Status panel: two-column grid. Inventory line lives in the overlay,
   // accessed via the Inventory (I) button beneath this grid.
+  const torchLabel = (p.torchCharges > 0)
+    ? `Torch: ${p.torchCharges} steps`
+    : 'Torch: out';
   document.getElementById('statusGrid').innerHTML =
     `<div>HP ${p.hp}/${p.hpMax}</div><div>Gold ${p.gold}</div>` +
     `<div>Wpn: ${p.weapon.name} (atk ${p.weapon.atk})</div>` +
-    `<div>Shld: ${p.shield.name} (DR ${p.shield.dr})</div>`;
+    `<div>Shld: ${p.shield.name} (DR ${p.shield.dr})</div>` +
+    `<div style="grid-column:1 / span 2;">${torchLabel}</div>`;
 
   const ca = document.getElementById('combatActions');
   ca.innerHTML = '';
@@ -2039,6 +2071,33 @@ function tickAnimation(now){
 
 // Per-frame ambient bob for enemies, the stairs-down arrow, and its label.
 // Skips an enemy that's currently driven by the lunge animation.
+// Adjust the torch point light + scene fog + left-hand HUD based on
+// the player's remaining torch charges. Also flickers when low.
+function applyTorchLightingEffects(){
+  const torch = scene && scene.getObjectByName('torch');
+  const charges = state.player.torchCharges;
+  const lh = document.querySelector('.hand.left');
+  if(charges <= 0){
+    // Torch out: dim point light, tighten fog, hide left-hand sprite.
+    if(torch){ torch.intensity = 0.25; torch.distance = CELL * 1.4; }
+    if(scene && scene.fog){ scene.fog.near = CELL * 0.2; scene.fog.far = CELL * 1.0; }
+    if(lh) lh.style.opacity = '0';
+    return;
+  }
+  // Lit: standard point-light + fog. Flicker when charges < 5.
+  let intensity = 1.6, distance = CELL * 3;
+  if(charges < 5){
+    intensity *= 0.55 + Math.random() * 0.55; // 0.55..1.10x of base
+    if(Math.random() < 0.18){
+      // Brief darker dip — scene gets noticeably dimmer.
+      intensity *= 0.35;
+    }
+  }
+  if(torch){ torch.intensity = intensity; torch.distance = distance; }
+  if(scene && scene.fog){ scene.fog.near = CELL * 0.5; scene.fog.far = CELL * 2.6; }
+  if(lh) lh.style.opacity = '1';
+}
+
 function bobEnemiesInPlace(now){
   if(!dungeonGroup) return;
   const w = (Math.PI * 2) / ENEMY_BOB_PERIOD_MS;
@@ -2452,6 +2511,7 @@ function loop(){
   tickEnemyLunge(now);
   tickEnemyPhrases(now);
   reapOrphanedPhraseSprites();
+  applyTorchLightingEffects();
   applyAttackSwingYawOffset(now);
   applyScreenShake(now);
   // Smooth ASCII map pan: interpolate continuous cell coords during a
