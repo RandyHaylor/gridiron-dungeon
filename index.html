@@ -68,6 +68,13 @@
     100% { opacity:0; transform:translateY(-40px); }
   }
   #playerDamageNum.show { animation: playerDamageNumKf 700ms ease-out forwards; }
+  /* Vignette overlay used during no-torch mode. */
+  #darkVignette { position:absolute; inset:0; pointer-events:none;
+                   z-index:6; opacity:0; transition: opacity 300ms ease;
+                   background: radial-gradient(circle at 50% 55%,
+                     transparent 18%, rgba(0,0,0,0.55) 45%,
+                     rgba(0,0,0,0.92) 75%, #000 100%); }
+  #darkVignette.active { opacity:1; }
   /* Attack swing: slash sword down and in front (toward screen center)
      in combination with the camera yaw rotation, then snap back.
      Combined duration tracks the JS PLAYER_SWING_TOTAL_MS. */
@@ -279,6 +286,9 @@
   <div id="hitFlash"></div>
   <!-- Big red damage number when the player gets hit. -->
   <div id="playerDamageNum"></div>
+  <!-- Radial vignette: shown only when torch is out, gives a fuzzy
+       circular black border around what little remains visible. -->
+  <div id="darkVignette"></div>
   <!-- Top HUD strip: dungeon level + HP. Always visible over the 3D view. -->
   <div id="topHud">
     <span id="topHudLvl">Lv 1</span>
@@ -719,12 +729,8 @@ function renderVisibleRooms(){
       const nx = cx + DIR_VEC[d][0], ny = cy + DIR_VEC[d][1];
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
-      // Render radius depends on whether the player has a lit torch.
-      // Lit: Chebyshev <= 2 (5x5). Out: Chebyshev <= 1 (3x3) — neighbor
-      // geometry exists so the fog has something to fade across. Side
-      // cells are still occluded because the point-light range and the
-      // fog far don't reach them, leaving them fully black.
-      const radius = (state.player.torchCharges > 0) ? 2 : 1;
+      // Lit: Chebyshev <= 2. Out: 0 — no neighbor geometry rendered.
+      const radius = (state.player.torchCharges > 0) ? 2 : 0;
       if(Math.abs(nx - p.x) > radius || Math.abs(ny - p.y) > radius) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
@@ -2218,9 +2224,13 @@ function applyTorchLightingEffects(){
     const amb0 = scene && scene.getObjectByName('ambient');
     if(amb0) amb0.intensity = 0.15;
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
+    const vig = document.getElementById('darkVignette');
+    if(vig) vig.classList.add('active');
     return;
   }
   // Torch lit — ensure ambient is back to its standard level.
+  const vigOff = document.getElementById('darkVignette');
+  if(vigOff) vigOff.classList.remove('active');
   const amb = scene && scene.getObjectByName('ambient');
   if(amb) amb.intensity = 0.5;
   // Lit. Flicker when charges < 10: ambient light HARD-SWAPS between
