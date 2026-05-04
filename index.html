@@ -1839,6 +1839,9 @@ const REPEAT_KEYS = new Set([
 const heldRepeatingKeys = new Set();
 
 function dispatchKeyAction(key){
+  // Game not yet started (start screen still up) -> ignore all keys.
+  const ss = document.getElementById('startScreen');
+  if(ss && !ss.hidden) return;
   // When dead, only Space restarts the run; everything else is locked.
   if(state.dead){
     if(key === ' ') restartGameAfterDeath();
