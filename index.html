@@ -2199,21 +2199,20 @@ function applyTorchLightingEffects(){
     // Light at cell center; range covers own walls (2 from center, plus
     // some bleed) but does NOT reach neighbor cells (4+ from center).
     if(torch){
-      torch.intensity = 0.6;
-      torch.distance  = CELL * 0.65;
+      torch.intensity = 1.2;
+      torch.distance  = CELL * 0.55; // ~2.2 — barely covers own walls
       torch.position.set(cellCenterX, WALL_H * 0.55, cellCenterZ);
     }
-    // Push fog.near PAST the cell's far wall so all own-room walls live
-    // in the no-fog zone — same shape as lit mode, just at 1x1 scale.
-    // Adjacent room walls beyond fog.near fade smoothly to fully black
-    // by fog.far, providing the fuzzy player-following border.
+    // fog.near still past the cell's far wall (so all own-room walls
+    // live in the no-fog zone and rotation does not dim them); fog.far
+    // pulled in tight so neighbors fade to black quickly.
     if(scene && scene.fog){
-      scene.fog.near = CELL * 1.0; // 4 — past 3.6 own-cell far wall
-      scene.fog.far  = CELL * 1.6; // 6.4 — neighbor walls fade to black
+      scene.fog.near = CELL * 1.0; // 4 — past every own-cell wall
+      scene.fog.far  = CELL * 1.25;// 5.0 — neighbors gone fast
     }
-    // Make sure ambient is restored if it was zeroed by a previous mode.
+    // Lower ambient so unlit pixels read as much darker.
     const amb0 = scene && scene.getObjectByName('ambient');
-    if(amb0) amb0.intensity = 0.5;
+    if(amb0) amb0.intensity = 0.15;
     if(lh){ lh.style.transition = ''; lh.style.opacity = '0'; lh.style.filter = ''; }
     return;
   }
