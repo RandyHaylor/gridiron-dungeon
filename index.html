@@ -1974,13 +1974,31 @@ let audioStarted     = false;
 function pickRandomMusicTrack(){
   return MUSIC_TRACKS[Math.floor(Math.random()*MUSIC_TRACKS.length)];
 }
+const MUSIC_TAIL_FADE_SECONDS = 3.0;     // fade out over last 3s of a track
+const MUSIC_GAP_MIN_MS = 3000;           // 3..8s gap between tracks
+const MUSIC_GAP_MAX_MS = 8000;
 function startBackgroundMusic(){
   if(audioMusicEl){
     try { audioMusicEl.pause(); } catch(_){}
   }
   audioMusicEl = new Audio(pickRandomMusicTrack());
   audioMusicEl.volume = audioMusicVolume;
-  audioMusicEl.onended = ()=>{ if(audioStarted) startBackgroundMusic(); };
+  audioMusicEl.ontimeupdate = ()=>{
+    if(!audioMusicEl) return;
+    const dur = audioMusicEl.duration;
+    if(!isFinite(dur)) return;
+    const remaining = dur - audioMusicEl.currentTime;
+    if(remaining <= MUSIC_TAIL_FADE_SECONDS){
+      const f = Math.max(0, remaining / MUSIC_TAIL_FADE_SECONDS);
+      audioMusicEl.volume = audioMusicVolume * f;
+    }
+  };
+  audioMusicEl.onended = ()=>{
+    if(!audioStarted) return;
+    const delayMs = MUSIC_GAP_MIN_MS +
+      Math.floor(Math.random() * (MUSIC_GAP_MAX_MS - MUSIC_GAP_MIN_MS + 1));
+    setTimeout(()=>{ if(audioStarted) startBackgroundMusic(); }, delayMs);
+  };
   audioMusicEl.play().catch(()=>{});
 }
 function setMusicVolume(v){
