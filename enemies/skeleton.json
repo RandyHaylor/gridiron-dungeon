@@ -11,5 +11,9 @@
     "Grave dust", "Unwelcome guest", "Tomb voice", "Bones rise", "Resurrect me",
     "Endless watch", "Marrow gone", "Empty skull", "Forever still", "Pale guardian",
     "Lifeless servant", "Cold steel", "Eternal march", "Crypt crawler", "Sleep, sleep"
+  ],
+  "movements": [
+    "clatters", "bones grind", "creaks", "rattles",
+    "raises blade", "tilts skull", "exhales dust", "stiffens"
   ]
 }

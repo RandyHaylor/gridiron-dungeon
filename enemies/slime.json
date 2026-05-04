@@ -11,5 +11,9 @@
     "Burble", "Spit splash", "Liquid friend", "Acid kiss", "Engulfing",
     "Watery doom", "Slither slither", "Goo to you", "Squelchy", "Glub glub",
     "Splatter", "Cold ooze", "Goo or me?", "Suck and slurp", "Jiggle"
+  ],
+  "movements": [
+    "jiggles", "oozes", "plops", "burbles",
+    "bubbles", "ripples", "stretches", "splatters"
   ]
 }

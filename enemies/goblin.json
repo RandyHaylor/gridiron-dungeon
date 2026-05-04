@@ -11,5 +11,9 @@
     "Cudgel time", "Headbash!", "Snicker snicker", "Pointy stick!", "Yummmm",
     "Dance for me!", "Brain food!", "Crunch crunch", "Tribe fight!", "Bloodtime",
     "Eat your shoes", "Yikes shiny!", "Goblin gambit", "Sneaky goblin!", "Trip trip!"
+  ],
+  "movements": [
+    "snickers", "spits", "picks nose", "scratches butt",
+    "bares teeth", "cracks knuckles", "hops", "leers"
   ]
 }

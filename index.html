@@ -624,9 +624,9 @@ function drawRoom(c, gx, gy){
     eObj.userData.cellX = gx;
     eObj.userData.cellY = gy;
     eObj.userData.enemyRef = c.enemy;
-    // The previous mesh (if any) was destroyed when dungeonGroup cleared,
-    // so any lingering phrase sprite reference on the data is now stale.
-    c.enemy.currentPhraseSprite = null;
+    // Phrase sprites are parented to the scene root (not this mesh), so
+    // they survive a renderVisibleRooms rebuild and don't need to be
+    // cleared here.
     dungeonGroup.add(eObj);
   }
 }
@@ -698,7 +698,10 @@ function shortestYawDelta(from, to){
 }
 function smoothstep(t){ return t*t*(3 - 2*t); }
 
-function makeTextSprite(text){
+function makeTextSprite(text, opts){
+  opts = opts || {};
+  const borderColor = opts.borderColor || '#0f0';
+  const textColor   = opts.textColor   || '#bfffbf';
   const padX=12, padY=8;
   const cv = document.createElement('canvas');
   const ctx = cv.getContext('2d');
@@ -712,10 +715,10 @@ function makeTextSprite(text){
   c2.font = font;
   c2.fillStyle = 'rgba(0,0,0,0.7)';
   c2.fillRect(0,0,cv.width,cv.height);
-  c2.strokeStyle = '#0f0';
+  c2.strokeStyle = borderColor;
   c2.lineWidth = 2;
   c2.strokeRect(1,1,cv.width-2,cv.height-2);
-  c2.fillStyle = '#bfffbf';
+  c2.fillStyle = textColor;
   c2.textBaseline = 'middle';
   c2.fillText(text, padX, cv.height/2);
   const tex = new THREE.CanvasTexture(cv);
@@ -1656,22 +1659,48 @@ const ENEMY_PHRASE_FILE = {
   'Skeleton':  'enemies/skeleton.json',
   'Slime':     'enemies/slime.json',
 };
-// Default in-line phrase library so chatter still works if the JSON
-// fetch fails (e.g. file:// or restrictive CORS). Async loader below
-// will OVERWRITE these entries when it succeeds.
+// Library entries: {phrases:[...speech...], movements:[...action...]}.
+// Inline fallback covers the case when the JSON fetch fails. Async loader
+// below replaces values on success.
 const enemyPhraseLibrariesByName = {
-  'Giant Rat': ['Squeak!','Cheese?','Nibble nibble','Dark scurry','Bite bite','My turf','Plague carrier','Tiny terror'],
-  'Goblin':    ['Squishy human!','Get out!','I see you','My loot!','Stab stab','Boss says kill','Tribe rule!','Snicker snicker'],
-  'Skeleton':  ['Bones rattle...','Cold grave','Endless duty','Empty sockets','Forever still','Click clack','I once breathed','Dust to dust'],
-  'Slime':     ['Glorp!','Squish!','Wibble wobble','Goo goo','Sticky hello','Bouncy boy','Jiggle','Sploosh'],
+  'Giant Rat': { phrases: ['Squeak!','Cheese?','Nibble nibble','My turf','Plague!','Tiny terror'],
+                 movements: ['scurries','sniffs','bares fangs'] },
+  'Goblin':    { phrases: ['Squishy human!','Get out!','I see you','My loot!','Stab stab','Tribe rule!'],
+                 movements: ['snickers','spits','picks nose'] },
+  'Skeleton':  { phrases: ['Bones rattle...','Cold grave','Endless duty','Forever still','Dust to dust'],
+                 movements: ['clatters','bones grind','creaks'] },
+  'Slime':     { phrases: ['Glorp!','Squish!','Wibble wobble','Goo goo','Sticky hello','Sploosh'],
+                 movements: ['jiggles','oozes','plops'] },
 };
+// Shared cross-enemy list of comical lines. 10% of every phrase emission
+// gets pulled from this instead of the enemy's own library, popped from
+// a per-enemy randomized copy that refreshes when emptied.
+const FUNNY_SHARED_PHRASES = [
+  "Is it break time yet?",
+  "I need tuesday off",
+  "I need a raise...",
+  "...arrow to the knee...",
+  "what has it gots?",
+  "Have you tried turning",
+  "off and on again?",
+  "Five more minutes...",
+  "Union meeting",
+  "Need coffee",
+  "Wrong dungeon",
+  "Did I leave the stove on?",
+  "Boss never visits",
+];
+const FUNNY_PHRASE_CHANCE = 0.10;
 async function loadAllEnemyPhraseLibraries(){
   await Promise.all(Object.entries(ENEMY_PHRASE_FILE).map(async ([name, path])=>{
     try{
       const r = await fetch(path);
       if(!r.ok) return;
       const data = await r.json();
-      enemyPhraseLibrariesByName[name] = Array.isArray(data.phrases) ? data.phrases : [];
+      enemyPhraseLibrariesByName[name] = {
+        phrases:   Array.isArray(data.phrases)   ? data.phrases   : [],
+        movements: Array.isArray(data.movements) ? data.movements : [],
+      };
     }catch(e){
       console.warn('[gridiron] phrase fetch failed for', name, e);
     }
@@ -1684,13 +1713,27 @@ function shuffleInPlace(a){
   }
   return a;
 }
+// Returns {text, kind} or null. kind is 'speech' | 'movement' | 'funny'.
 function getNextPhraseForEnemy(enemy){
-  const lib = enemyPhraseLibrariesByName[enemy.name];
-  if(!lib || !lib.length) return null;
-  if(!enemy.phraseQueue || enemy.phraseQueue.length === 0){
-    enemy.phraseQueue = shuffleInPlace(lib.slice());
+  // 10% chance: pull from the shared funny list (per-enemy randomized
+  // queue, refreshed when exhausted).
+  if(Math.random() < FUNNY_PHRASE_CHANCE){
+    if(!enemy.funnyQueue || enemy.funnyQueue.length === 0){
+      enemy.funnyQueue = shuffleInPlace(FUNNY_SHARED_PHRASES.slice());
+    }
+    const t = enemy.funnyQueue.pop();
+    if(t) return { text: t, kind: 'funny' };
   }
-  return enemy.phraseQueue.pop();
+  const lib = enemyPhraseLibrariesByName[enemy.name];
+  if(!lib) return null;
+  if(!enemy.phraseQueue || enemy.phraseQueue.length === 0){
+    const deck = [];
+    (lib.phrases   || []).forEach(t => deck.push({ text: t, kind: 'speech'   }));
+    (lib.movements || []).forEach(t => deck.push({ text: t, kind: 'movement' }));
+    if(deck.length === 0) return null;
+    enemy.phraseQueue = shuffleInPlace(deck);
+  }
+  return enemy.phraseQueue.pop() || null;
 }
 const PHRASE_SHOW_MIN_MS = 2000;
 const PHRASE_SHOW_MAX_MS = 4000;
@@ -1699,7 +1742,7 @@ const PHRASE_GAP_MIN_MS  = 2000;
 const PHRASE_GAP_MAX_MS  = 5000;
 
 function tickEnemyPhrases(now){
-  if(!dungeonGroup) return;
+  if(!dungeonGroup || !scene) return;
   for(const obj of dungeonGroup.children){
     const u = obj.userData;
     if(!u || !u.isEnemy || u.dying) continue;
@@ -1711,19 +1754,17 @@ function tickEnemyPhrases(now){
       enemy.phraseQueue = enemy.phraseQueue || [];
     }
 
-    // If our currentPhraseSprite is parented to a different/old object
-    // (after a renderVisibleRooms), drop the reference.
-    if(enemy.currentPhraseSprite && enemy.currentPhraseSprite.parent !== obj){
-      enemy.currentPhraseSprite = null;
-    }
-
+    // Active phrase: keep the scene-parented sprite riding above the
+    // CURRENT enemy mesh's world position, so renderVisibleRooms (player
+    // moves/rotates) doesn't kill the bubble or restart the cycle.
     if(enemy.currentPhraseSprite){
       const sp = enemy.currentPhraseSprite;
+      sp.position.set(obj.position.x, obj.position.y + 1.25, obj.position.z);
       if(now >= enemy.currentPhraseFadeStart){
         const fadeT = Math.min(1, (now - enemy.currentPhraseFadeStart) / PHRASE_FADE_MS);
         sp.material.opacity = 1 - fadeT;
         if(fadeT >= 1){
-          obj.remove(sp);
+          scene.remove(sp);
           if(sp.material){
             if(sp.material.map) sp.material.map.dispose();
             sp.material.dispose();
@@ -1739,16 +1780,15 @@ function tickEnemyPhrases(now){
 
     if(now >= enemy.nextPhraseAt){
       const phrase = getNextPhraseForEnemy(enemy);
-      if(!phrase){
-        enemy.nextPhraseAt = now + 5000;
-        continue;
-      }
-      const sp = makeTextSprite(phrase);
-      sp.position.set(0, 1.25, 0); // local: above enemy head
+      if(!phrase){ enemy.nextPhraseAt = now + 5000; continue; }
+      // Movements wrap with asterisks; speech and funny render plain.
+      const display = (phrase.kind === 'movement') ? `*${phrase.text}*` : phrase.text;
+      const sp = makeTextSprite(display, { borderColor: '#f44', textColor: '#ffd9d9' });
+      sp.position.set(obj.position.x, obj.position.y + 1.25, obj.position.z);
       sp.material.depthTest = false;
       sp.material.opacity = 1;
       sp.renderOrder = 1000;
-      obj.add(sp);
+      scene.add(sp);
       enemy.currentPhraseSprite = sp;
       const showMs = PHRASE_SHOW_MIN_MS + Math.random()*(PHRASE_SHOW_MAX_MS-PHRASE_SHOW_MIN_MS);
       enemy.currentPhraseFadeStart = now + showMs;
