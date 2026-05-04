@@ -412,11 +412,10 @@ let dungeonGroup;
 function initThree(){
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  // Fuzzy edge of vision: linear distance fog tuned so the player's own
-  // room is fully clear, the next room edge softens, and the boundary of
-  // the 3x3 BFS-rendered area dissolves to black. Anchored to the
-  // camera, so it moves smoothly with the player on every frame.
-  scene.fog = new THREE.Fog(0x000000, CELL * 1.4, CELL * 2.6);
+  // Fuzzy fog of war: starts close (slight dimming even in current room)
+  // and reaches full black just past the BFS boundary (5x5 / Chebyshev<=2).
+  // Camera-anchored so it moves smoothly in any direction.
+  scene.fog = new THREE.Fog(0x000000, CELL * 0.5, CELL * 2.6);
 
   // 3D viewport: 4:3 (400x300), top of the layout — same on every device.
   const VIEW_W = 400, VIEW_H = 300;
@@ -545,7 +544,10 @@ function renderVisibleRooms(){
       const nx = cx + DIR_VEC[d][0], ny = cy + DIR_VEC[d][1];
       const key = `${nx},${ny}`;
       if(visited.has(key)) continue;
-      if(Math.abs(nx - p.x) > 1 || Math.abs(ny - p.y) > 1) continue;
+      // Render up to Chebyshev <= 2 (5x5 around player) so the cells you're
+      // facing don't suddenly drop out when you take a single step backward;
+      // the outer ring stays under heavy fog and visually dissolves.
+      if(Math.abs(nx - p.x) > 2 || Math.abs(ny - p.y) > 2) continue;
       visited.add(key);
       queue.push({cx:nx, cy:ny});
     }
@@ -1646,7 +1648,15 @@ const ENEMY_PHRASE_FILE = {
   'Skeleton':  'enemies/skeleton.json',
   'Slime':     'enemies/slime.json',
 };
-const enemyPhraseLibrariesByName = {}; // populated from JSON at startup
+// Default in-line phrase library so chatter still works if the JSON
+// fetch fails (e.g. file:// or restrictive CORS). Async loader below
+// will OVERWRITE these entries when it succeeds.
+const enemyPhraseLibrariesByName = {
+  'Giant Rat': ['Squeak!','Cheese?','Nibble nibble','Dark scurry','Bite bite','My turf','Plague carrier','Tiny terror'],
+  'Goblin':    ['Squishy human!','Get out!','I see you','My loot!','Stab stab','Boss says kill','Tribe rule!','Snicker snicker'],
+  'Skeleton':  ['Bones rattle...','Cold grave','Endless duty','Empty sockets','Forever still','Click clack','I once breathed','Dust to dust'],
+  'Slime':     ['Glorp!','Squish!','Wibble wobble','Goo goo','Sticky hello','Bouncy boy','Jiggle','Sploosh'],
+};
 async function loadAllEnemyPhraseLibraries(){
   await Promise.all(Object.entries(ENEMY_PHRASE_FILE).map(async ([name, path])=>{
     try{
@@ -1654,7 +1664,9 @@ async function loadAllEnemyPhraseLibraries(){
       if(!r.ok) return;
       const data = await r.json();
       enemyPhraseLibrariesByName[name] = Array.isArray(data.phrases) ? data.phrases : [];
-    }catch(_){ /* offline / no server — skip */ }
+    }catch(e){
+      console.warn('[gridiron] phrase fetch failed for', name, e);
+    }
   }));
 }
 function shuffleInPlace(a){
