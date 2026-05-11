@@ -125,3 +125,15 @@ dark_atari_dungeon_mp3_pack_v4_full_music/            # mp3 audio assets
 python3 -m http.server 8765
 # then open http://localhost:8765/
 ```
+
+## Design docs
+
+Overview-level guides for anyone (human or AI agent) wanting to get
+oriented before reading code:
+
+- [design-docs/architecture-overview.md](design-docs/architecture-overview.md)
+- [design-docs/game-rules.md](design-docs/game-rules.md)
+- [design-docs/enemies.md](design-docs/enemies.md)
+- [design-docs/user-interface.md](design-docs/user-interface.md)
+
+These are intentionally brief — the code is the source of truth.
